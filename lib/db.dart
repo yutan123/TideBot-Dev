@@ -492,11 +492,12 @@ class DBManager {
     final path = p.join(await getDatabasesPath(), 'tidebot.db');
     final database = await openDatabase(
       path,
-      version: 35,
+      version: 36,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
       onOpen: (db) async {
+        await _createSkillTables(db);
         await MediaStorageService.ensureSchema(db);
         await db.execute(
             'CREATE TABLE IF NOT EXISTS foreground_message_events (message_id TEXT PRIMARY KEY)');
@@ -1071,6 +1072,9 @@ class DBManager {
               await db.execute('ALTER TABLE bots ADD COLUMN video_model TEXT');
             } catch (_) {}
           }
+          if (oldVersion < 36) {
+            await _createSkillTables(db);
+          }
         } catch (error) {
           print('[db] onUpgrade continued after error: $error');
         }
@@ -1155,6 +1159,12 @@ class DBManager {
   }
 
   Future<void> _createSkillTables(DatabaseExecutor db) async {
+    await _execSql(db, '''CREATE TABLE IF NOT EXISTS plugins (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, version TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '',
+      manifest_json TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 0,
+      config_json TEXT NOT NULL DEFAULT '{}', updated_at INTEGER NOT NULL
+    )''');
     await _execSql(db, '''CREATE TABLE IF NOT EXISTS skills (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, version TEXT NOT NULL,
       description TEXT DEFAULT '', manifest_json TEXT NOT NULL,
@@ -1192,6 +1202,24 @@ class DBManager {
       id TEXT PRIMARY KEY, source TEXT NOT NULL, tool_name TEXT NOT NULL,
       input_summary TEXT NOT NULL, status TEXT NOT NULL, duration_ms INTEGER NOT NULL,
       error TEXT, created_at INTEGER NOT NULL)''');
+  }
+
+  Future<List<Map<String, dynamic>>> queryPlugins() async =>
+      (await database).query('plugins', orderBy: 'updated_at DESC');
+  Future<void> savePlugin(Map<String, dynamic> plugin) async => (await database)
+      .insert('plugins', plugin, conflictAlgorithm: ConflictAlgorithm.replace);
+  Future<void> setPluginEnabled(String id, bool enabled) async =>
+      (await database).update('plugins', {'enabled': enabled ? 1 : 0},
+          where: 'id = ?', whereArgs: [id]);
+  Future<void> deletePlugin(String id) async =>
+      (await database).delete('plugins', where: 'id = ?', whereArgs: [id]);
+  Future<void> savePluginConfig(String id, String config) async =>
+      (await database).update('plugins', {'config_json': config},
+          where: 'id = ?', whereArgs: [id]);
+  Future<String?> pluginConfig(String id) async {
+    final rows = await (await database).query('plugins',
+        columns: ['config_json'], where: 'id = ?', whereArgs: [id], limit: 1);
+    return rows.isEmpty ? null : rows.first['config_json']?.toString();
   }
 
   Future<List<Map<String, dynamic>>> queryEnabledSkillTools(

@@ -50,7 +50,8 @@ class TideApplication : Application() {
             (getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager)
                 .runningAppProcesses?.firstOrNull { it.pid == android.os.Process.myPid() }?.processName
         }
-        if (processName == "$packageName:memory_embedding") return
+        if (processName == "$packageName:memory_embedding" ||
+            processName?.startsWith("$packageName:tide_plugin_") == true) return
         // WorkManager's initializer runs before Application.onCreate. Neither
         // recovery nor the watchdog requires an Activity or a persistent FGS.
         runCatching {

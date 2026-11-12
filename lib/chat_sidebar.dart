@@ -260,6 +260,28 @@ class _ChatSidebarState extends State<ChatSidebar> {
                                     ),
                                   ],
                                 ),
+                                const SizedBox(height: 10),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: _managerButton(
+                                        theme,
+                                        Icons.widgets_rounded,
+                                        '插件',
+                                        'plugin',
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: _managerButton(
+                                        theme,
+                                        Icons.palette_rounded,
+                                        '主题',
+                                        null,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ],
                             ),
                           ),
@@ -457,10 +479,12 @@ class _ChatSidebarState extends State<ChatSidebar> {
     TideTheme theme,
     IconData icon,
     String label,
-    String id,
+    String? id,
   ) =>
       BouncyTap(
-        onTap: () => widget.onOpenManager(id),
+        onTap: () {
+          if (id != null) widget.onOpenManager(id);
+        },
         child: Container(
           height: 52,
           padding: const EdgeInsets.symmetric(horizontal: 14),

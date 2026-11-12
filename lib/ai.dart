@@ -1,3 +1,4 @@
+import 'plugin_service.dart';
 import 'proactive_request_gate.dart';
 import 'native_background_coordinator.dart';
 import 'global_notice.dart';
@@ -4147,7 +4148,10 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
 
   Future<List<Map<String, dynamic>>> _buildExternalTools(
           DBManager db, String botId) async =>
-      (await _toolPackages(db, botId)).schemas();
+      [
+        ...(await _toolPackages(db, botId)).schemas(),
+        ...await PluginService.instance.schemas(),
+      ];
 
   Future<Map<String, dynamic>> _executePackageTool({
     required DBManager db,
@@ -4650,6 +4654,36 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     Map<int, String> inspectableImages = const {},
     Map<int, String> currentImages = const {},
   }) async {
+    final before = await PluginService.instance.hook('tool.before', {
+      'botId': botId, 'call': call,
+    });
+    final Map<String, dynamic> result;
+    if (before['handled'] == true && before['result'] is Map) {
+      result = Map<String, dynamic>.from(before['result'] as Map);
+    } else {
+      result = await _executeNativeToolCallCore(
+        db: db, botId: botId,
+        call: before['call'] is Map
+            ? Map<String, dynamic>.from(before['call'] as Map) : call,
+        allowedStickerTypes: allowedStickerTypes,
+        inspectableImages: inspectableImages, currentImages: currentImages,
+      );
+    }
+    final after = await PluginService.instance.hook('tool.after', {
+      'botId': botId, 'call': call, 'result': result,
+    });
+    return after['result'] is Map
+        ? Map<String, dynamic>.from(after['result'] as Map) : result;
+  }
+
+  Future<Map<String, dynamic>> _executeNativeToolCallCore({
+    required DBManager db,
+    required String botId,
+    required Map<String, dynamic> call,
+    Set<String> allowedStickerTypes = const {},
+    Map<int, String> inspectableImages = const {},
+    Map<int, String> currentImages = const {},
+  }) async {
     final function = call['function'];
     if (function is! Map)
       return {
@@ -4663,6 +4697,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       return {
         'result': {'ok': false, 'error': '工具参数不是合法 JSON'},
       };
+    }
+    if (name.startsWith('tp_')) {
+      return PluginService.instance.execute(name, args);
     }
     if (name == 'get_tool_package' || name == 'call_package_tool') {
       return _executePackageTool(db: db, botId: botId, name: name, args: args);
@@ -6090,7 +6127,7 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
 // 辅助函数：格式化视频时长
 String _formatVideoDuration(int seconds) {
   if (seconds < 60) {
-    return '${seconds}秒';
+    return '$seconds秒';
   } else if (seconds < 3600) {
     final minutes = seconds ~/ 60;
     final remainingSeconds = seconds % 60;

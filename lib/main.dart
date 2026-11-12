@@ -1,3 +1,5 @@
+import 'plugin_process_entry.dart' as plugin_process;
+import 'plugin_service.dart';
 import 'internet_reachability_monitor.dart';
 import 'proactive_reply_engine.dart';
 import 'native_background_coordinator.dart';
@@ -16,6 +18,7 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'theme.dart';
 import 'chat_sidebar.dart';
+import 'plugin_manager_page.dart';
 import 'tool_manager_page.dart';
 import 'ui_chat_list.dart';
 // Chat room is opened through app navigation elsewhere.
@@ -84,6 +87,7 @@ Future<void> _startBackgroundServices({bool loadTheme = true}) async {
     ),
   );
   unawaited(_runStartupTask('haptics', TideHaptics.load));
+  unawaited(_runStartupTask('plugins', PluginService.instance.initialize));
   unawaited(
     _runStartupTask('app log', AppLogService.instance.restoreForLaunch),
   );
@@ -1517,11 +1521,13 @@ class _TideMainScaffoldState extends State<TideMainScaffold>
                     if (!mounted) return;
                     Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (_) => ToolManagerPage(
-                          kind: kind == 'skill'
-                              ? ToolManagerKind.skill
-                              : ToolManagerKind.mcp,
-                        ),
+                        builder: (_) => kind == 'plugin'
+                            ? const PluginManagerPage()
+                            : ToolManagerPage(
+                                kind: kind == 'skill'
+                                    ? ToolManagerKind.skill
+                                    : ToolManagerKind.mcp,
+                              ),
                       ),
                     );
                   },
@@ -1534,3 +1540,7 @@ class _TideMainScaffoldState extends State<TideMainScaffold>
     );
   }
 }
+
+// Native services resolve this named entrypoint without executing application main.
+@pragma('vm:entry-point')
+Future<void> tidePluginProcessMain() => plugin_process.pluginProcessMain();

@@ -1,0 +1,8 @@
+{
+  "type": "column",
+  "children": [
+    { "type": "text", "style": "title", "text": "Hello 示例插件" },
+    { "type": "input", "id": "name", "label": "你的名字", "value": "" },
+    { "type": "button", "label": "问候", "action": "greet" }
+  ]
+}

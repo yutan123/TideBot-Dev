@@ -880,6 +880,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.2.1"
+  quickjs_engine:
+    dependency: "direct main"
+    description:
+      name: quickjs_engine
+      sha256: "76fd249a53e5505111596231d4667c464bb8f19d029dde53f5d13f37b6a6bffb"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.7"
   record:
     dependency: "direct main"
     description:
@@ -1109,6 +1117,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.4.1"
+  sync_http:
+    dependency: transitive
+    description:
+      name: sync_http
+      sha256: "7f0cd72eca000d2e026bcd6f990b81d0ca06022ef4e32fb257b30d3d1014a961"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.3.1"
   synchronized:
     dependency: transitive
     description:
@@ -1133,6 +1149,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.7.11"
+  tide_plugin_process:
+    dependency: "direct main"
+    description:
+      path: "packages/tide_plugin_process"
+      relative: true
+    source: path
+    version: "1.0.0"
   timezone:
     dependency: transitive
     description:

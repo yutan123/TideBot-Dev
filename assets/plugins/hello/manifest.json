@@ -1,0 +1,46 @@
+{
+  "apiVersion": 1,
+  "id": "tide.example.hello",
+  "name": "Hello 示例",
+  "version": "1.0.0",
+  "description": "展示工具、配置、存储、UI 和 Hook 的最小参考插件",
+  "author": "TideBot",
+  "entry": "main.js",
+  "permissions": ["storage"],
+  "config": {
+    "type": "object",
+    "properties": {
+      "greeting": {
+        "type": "string",
+        "title": "问候语",
+        "default": "Hello",
+        "maxLength": 20
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "greet",
+      "description": "用配置的问候语向指定名字问好，并累计调用次数",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "maxLength": 50 }
+        },
+        "required": ["name"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_stats",
+      "description": "返回当前问候语和历史调用次数",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    }
+  ],
+  "hooks": ["tool.before"],
+  "ui": { "entry": "ui.json" }
+}
