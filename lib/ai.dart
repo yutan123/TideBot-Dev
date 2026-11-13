@@ -4699,7 +4699,7 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       };
     }
     if (name.startsWith('tp_')) {
-      return PluginService.instance.execute(name, args);
+      return PluginService.instance.execute(name, args, botId: botId);
     }
     if (name == 'get_tool_package' || name == 'call_package_tool') {
       return _executePackageTool(db: db, botId: botId, name: name, args: args);

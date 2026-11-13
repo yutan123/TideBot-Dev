@@ -195,119 +195,480 @@ class _PluginManagerPageState extends State<PluginManagerPage> {
     }
   }
 
-  Widget _logo() => Image.asset(
-    'assets/images/logo.png',
-    width: 48,
-    height: 48,
-    fit: BoxFit.cover,
+  Widget _pluginIcon(TidePluginPackage? pack, {double size = 44}) {
+    final theme = TideTheme.of(context);
+    final icon = pack?.manifest['icon'] as String?;
+    final fallback = Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            theme.primary.withValues(alpha: .18),
+            theme.primary.withValues(alpha: .06),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Icon(
+        Icons.extension_rounded,
+        size: size * .5,
+        color: theme.primary,
+      ),
+    );
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(size * .28),
+      child: icon == null || pack == null
+          ? fallback
+          : Image.file(
+              File(p.join(pack.directory.path, icon)),
+              width: size,
+              height: size,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => fallback,
+            ),
+    );
+  }
+
+  String _author(Map<String, dynamic> row) {
+    final author = row['author']?.toString().trim() ?? '';
+    return author.isEmpty ? '未知作者' : author;
+  }
+
+  Future<void> _details(Map<String, dynamic> row) => TideDialogs.show<void>(
+    context: context,
+    builder: (dialogContext) {
+      final theme = TideTheme.of(dialogContext);
+      final pack = _packages[row['id']];
+      final error = PluginService.instance.errors[row['id']];
+      return Center(
+        child: Material(
+          color: Colors.transparent,
+          child: TideDialogs.glassContent(
+            context: dialogContext,
+            children: [
+              Row(
+                children: [
+                  _pluginIcon(pack, size: 52),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          row['name']?.toString() ?? row['id'].toString(),
+                          style: TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.w700,
+                            color: theme.textStrong,
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          '${_author(row)} · v${row['version']}',
+                          style: TextStyle(fontSize: 12, color: theme.textWeak),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '关闭详情',
+                    onPressed: () => Navigator.pop(dialogContext),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 22),
+              Text(
+                '插件介绍',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: theme.textWeak,
+                ),
+              ),
+              const SizedBox(height: 9),
+              SelectableText(
+                (row['description']?.toString().trim().isNotEmpty ?? false)
+                    ? row['description'].toString()
+                    : '暂无介绍',
+                style: TextStyle(
+                  fontSize: 14,
+                  height: 1.65,
+                  color: theme.textStrong,
+                ),
+              ),
+              const SizedBox(height: 20),
+              SelectableText(
+                'ID  ${row['id']}',
+                style: TextStyle(fontSize: 12, color: theme.textWeak),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                pack == null
+                    ? '插件文件不可用'
+                    : row['enabled'] == 1
+                    ? '已启用'
+                    : '未启用',
+                style: TextStyle(fontSize: 12, color: theme.textWeak),
+              ),
+              if (pack != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  '工具 ${(pack.manifest['tools'] as List? ?? []).length} 个',
+                  style: TextStyle(fontSize: 12, color: theme.textWeak),
+                ),
+                if ((pack.manifest['permissions'] as List? ?? [])
+                    .isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  SelectableText(
+                    '权限  ${(pack.manifest['permissions'] as List).join(' · ')}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.5,
+                      color: theme.textWeak,
+                    ),
+                  ),
+                ],
+              ],
+              if (error != null) ...[
+                const SizedBox(height: 16),
+                SelectableText(
+                  error,
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.5,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    },
   );
 
+  Widget _action(
+    IconData icon,
+    String tooltip,
+    VoidCallback? onPressed, {
+    bool destructive = false,
+  }) {
+    final theme = TideTheme.of(context);
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+      padding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
+      style: IconButton.styleFrom(
+        foregroundColor: destructive
+            ? Theme.of(context).colorScheme.error.withValues(alpha: .8)
+            : theme.textWeak,
+        disabledForegroundColor: theme.textFaint,
+      ),
+      icon: Icon(icon, size: 19),
+    );
+  }
+
   Widget _card(Map<String, dynamic> row) {
+    final theme = TideTheme.of(context);
     final id = row['id'] as String;
     final pack = _packages[id];
-    final icon = pack?.manifest['icon'] as String?;
+    final enabled = row['enabled'] == 1;
     final error = PluginService.instance.errors[id];
     return Container(
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: TideTheme.of(context).surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: TideTheme.of(context).border),
+        color: theme.surface,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: theme.border.withValues(alpha: .45),
+          width: .7,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: theme.isDark ? .08 : .025),
+            blurRadius: 18,
+            offset: const Offset(0, 5),
+          ),
+        ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: icon == null || pack == null
-                    ? _logo()
-                    : Image.file(
-                        File(p.join(pack.directory.path, icon)),
-                        width: 48,
-                        height: 48,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _logo(),
-                      ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(22),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => _details(row),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 13, 8, 9),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      row['name']?.toString() ?? id,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: _pluginIcon(pack),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      row['description']?.toString() ?? '',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            row['name']?.toString() ?? id,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: theme.textStrong,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            row['description']?.toString() ?? '暂无介绍',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              height: 1.4,
+                              color: theme.textWeak,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            '${_author(row)} · ${row['version']}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: theme.textWeak,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${row['author'] == '' ? '未知作者' : row['author']} · v${row['version']}',
-                      style: Theme.of(context).textTheme.bodySmall,
+                    const SizedBox(width: 6),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Semantics(
+                        label: '启用插件',
+                        toggled: enabled,
+                        button: true,
+                        child: Tooltip(
+                          message: enabled ? '停用插件' : '启用插件',
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(20),
+                            onTap: _busy || pack == null
+                                ? null
+                                : () => _operate(
+                                    () => PluginService.instance.setEnabled(
+                                      id,
+                                      !enabled,
+                                    ),
+                                  ),
+                            child: SizedBox(
+                              width: 48,
+                              height: 44,
+                              child: Center(
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
+                                  width: 38,
+                                  height: 23,
+                                  padding: const EdgeInsets.all(3),
+                                  decoration: BoxDecoration(
+                                    color: enabled
+                                        ? theme.primary
+                                        : theme.surfaceVariant,
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: AnimatedAlign(
+                                    duration: const Duration(milliseconds: 200),
+                                    curve: Curves.easeOutCubic,
+                                    alignment: enabled
+                                        ? Alignment.centerRight
+                                        : Alignment.centerLeft,
+                                    child: Container(
+                                      width: 17,
+                                      height: 17,
+                                      decoration: BoxDecoration(
+                                        color: _busy || pack == null
+                                            ? theme.textFaint
+                                            : enabled
+                                            ? Colors.white
+                                            : theme.textWeak,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    const SizedBox(width: 56),
+                    Container(
+                      width: 5,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: error != null || pack == null
+                            ? Theme.of(context).colorScheme.error
+                            : enabled
+                            ? theme.primary
+                            : theme.textFaint,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        error != null
+                            ? '运行异常'
+                            : pack == null
+                            ? '文件不可用'
+                            : enabled
+                            ? '已启用'
+                            : '未启用',
+                        style: TextStyle(fontSize: 10, color: theme.textWeak),
+                      ),
+                    ),
+                    if (pack != null &&
+                        ((pack.manifest['config'] as Map?)?['properties']
+                                    as Map? ??
+                                {})
+                            .isNotEmpty)
+                      _action(
+                        Icons.tune_rounded,
+                        '插件设置',
+                        _busy ? null : () => _settings(pack),
+                      ),
+                    if (pack?.hasUi == true)
+                      _action(
+                        Icons.open_in_new_rounded,
+                        '打开插件',
+                        _busy
+                            ? null
+                            : () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => PluginUiPage(package: pack!),
+                                ),
+                              ),
+                      ),
+                    _action(
+                      Icons.upgrade_rounded,
+                      '更新插件',
+                      _busy ? null : () => _operate(() => _update(row)),
+                    ),
+                    _action(
+                      Icons.delete_outline_rounded,
+                      '卸载插件',
+                      _busy ? null : () => _remove(row),
+                      destructive: true,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _tabs() {
+    final theme = TideTheme.of(context);
+    return Container(
+      height: 48,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: theme.surfaceVariant.withValues(alpha: .65),
+        borderRadius: BorderRadius.circular(17),
+      ),
+      child: LayoutBuilder(
+        builder: (_, constraints) => Stack(
+          children: [
+            AnimatedAlign(
+              duration: const Duration(milliseconds: 240),
+              curve: Curves.easeOutCubic,
+              alignment: _tab == 0
+                  ? Alignment.centerLeft
+                  : Alignment.centerRight,
+              child: Container(
+                width: constraints.maxWidth / 2,
+                decoration: BoxDecoration(
+                  color: theme.surface,
+                  borderRadius: BorderRadius.circular(13),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: .06),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
                     ),
                   ],
                 ),
               ),
-              Switch(
-                value: row['enabled'] == 1,
-                onChanged: _busy || pack == null
-                    ? null
-                    : (value) => _operate(
-                        () => PluginService.instance.setEnabled(id, value),
-                      ),
-              ),
-            ],
-          ),
-          if (error != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                error,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
             ),
-          const Divider(height: 24),
-          Wrap(
-            alignment: WrapAlignment.end,
-            spacing: 4,
-            children: [
-              TextButton.icon(
-                onPressed: _busy || pack == null ? null : () => _settings(pack),
-                icon: const Icon(Icons.tune_rounded),
-                label: const Text('设置'),
-              ),
-              TextButton.icon(
-                onPressed: _busy ? null : () => _operate(() => _update(row)),
-                icon: const Icon(Icons.system_update_alt_rounded),
-                label: const Text('更新'),
-              ),
-              if (pack?.hasUi == true)
-                TextButton.icon(
-                  onPressed: _busy
-                      ? null
-                      : () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => PluginUiPage(package: pack!),
+            Row(
+              children: List.generate(2, (index) {
+                final selected = _tab == index;
+                return Expanded(
+                  child: Semantics(
+                    selected: selected,
+                    button: true,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(13),
+                        onTap: () => setState(() => _tab = index),
+                        child: Center(
+                          child: AnimatedDefaultTextStyle(
+                            duration: const Duration(milliseconds: 180),
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: selected
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                              color: selected
+                                  ? theme.textStrong
+                                  : theme.textWeak,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  index == 0
+                                      ? Icons.widgets_outlined
+                                      : Icons.storefront_outlined,
+                                  size: 17,
+                                  color: selected
+                                      ? theme.primary
+                                      : theme.textWeak,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(index == 0 ? '插件列表' : '插件市场'),
+                              ],
+                            ),
                           ),
                         ),
-                  icon: const Icon(Icons.open_in_full_rounded),
-                  label: const Text('打开界面'),
-                ),
-              IconButton(
-                tooltip: '删除插件',
-                onPressed: _busy ? null : () => _remove(row),
-                icon: const Icon(Icons.delete_outline_rounded),
-              ),
-            ],
-          ),
-        ],
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -321,25 +682,10 @@ class _PluginManagerPageState extends State<PluginManagerPage> {
         title: const Text('插件'),
         backgroundColor: theme.pageBackground,
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(56),
+          preferredSize: const Size.fromHeight(64),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-            child: SegmentedButton<int>(
-              segments: const [
-                ButtonSegment(
-                  value: 0,
-                  label: Text('插件列表'),
-                  icon: Icon(Icons.extension_rounded),
-                ),
-                ButtonSegment(
-                  value: 1,
-                  label: Text('插件市场'),
-                  icon: Icon(Icons.storefront_rounded),
-                ),
-              ],
-              selected: {_tab},
-              onSelectionChanged: (value) => setState(() => _tab = value.first),
-            ),
+            padding: const EdgeInsets.fromLTRB(20, 2, 20, 14),
+            child: _tabs(),
           ),
         ),
       ),

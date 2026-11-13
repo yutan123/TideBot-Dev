@@ -3516,7 +3516,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
               ? theme.glass.withValues(alpha: 0.15)
               : theme.hasGlobalBackground
                   ? theme.glass.withValues(alpha: 0.55)
-                  : Colors.transparent,
+                  : theme.pageBackground,
           child: SafeArea(
             bottom: false,
             child: Container(

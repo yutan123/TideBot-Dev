@@ -11,7 +11,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
-import 'package:path_provider/path_provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:heif_converter/heif_converter.dart';
 import 'persistent_service_coordinator.dart';
@@ -83,9 +82,7 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<void> _pickAvatar() async {
     if (!await AppPermissions.photos(context, feature: '更换头像')) return;
     try {
-      final img = await ImagePicker().pickImage(
-        source: ImageSource.gallery,
-      );
+      final img = await ImagePicker().pickImage(source: ImageSource.gallery);
       if (img == null) return;
       String path = img.path;
       if (path.toLowerCase().endsWith('.heic') ||
@@ -148,26 +145,26 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) => TideBackground(
-        child: SafeArea(
-          child: SingleChildScrollView(
-            physics: const BouncingScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 92),
-            child: Column(
-              children: [
-                _buildProfileCard(),
-                const SizedBox(height: 24),
-                ..._settings.map(
-                  (s) => BouncyTap(
-                    onTap: () => _onSetting(s),
-                    child: _buildSettingItem(s),
-                  ),
-                ),
-                const SizedBox(height: 20),
-              ],
+    child: SafeArea(
+      child: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 92),
+        child: Column(
+          children: [
+            _buildProfileCard(),
+            const SizedBox(height: 24),
+            ..._settings.map(
+              (s) => BouncyTap(
+                onTap: () => _onSetting(s),
+                child: _buildSettingItem(s),
+              ),
             ),
-          ),
+            const SizedBox(height: 20),
+          ],
         ),
-      );
+      ),
+    ),
+  );
   Widget _buildProfileCard() {
     final theme = TideTheme.of(context);
     final content = Row(
@@ -179,8 +176,8 @@ class _ProfilePageState extends State<ProfilePage> {
             backgroundColor: theme.primary.withValues(alpha: 0.15),
             backgroundImage:
                 _avatarPath.isNotEmpty && File(_avatarPath).existsSync()
-                    ? FileImage(File(_avatarPath))
-                    : null,
+                ? FileImage(File(_avatarPath))
+                : null,
             child: _avatarPath.isEmpty || !File(_avatarPath).existsSync()
                 ? Icon(Icons.person_rounded, size: 42, color: theme.primary)
                 : null,
@@ -319,64 +316,64 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _exportSelectedChat() => TransferProgress.guard(() async {
-        final botId = await _pickDataBot('选择要导出的机器人');
-        if (botId == null || !mounted) return;
-        try {
-          await TransferProgress.run(
-            context,
-            '正在打包聊天记录并准备保存…',
-            () => DataTransfer.exclusive(() async {
-              final export = await DBManager().buildChatExport(botId);
-              try {
-                final saved = await DataTransfer.save(
-                  export.file,
-                  export.fileName,
-                  'application/zip',
-                );
-                if (mounted && saved != null) {
-                  GlobalNotice.show(
-                    export.missingMedia == 0
-                        ? '聊天记录已导出'
-                        : '聊天记录已导出；${export.missingMedia} 处媒体引用已失效，文字和现有附件已保留',
-                  );
-                  TideHaptics.confirm();
-                }
-              } finally {
-                await export.file.parent.delete(recursive: true);
-              }
-            }),
-          );
-        } catch (e) {
-          if (mounted) {
-            GlobalNotice.show('导出失败：$e', color: const Color(0xFFE74C3C));
-            TideHaptics.error();
+    final botId = await _pickDataBot('选择要导出的机器人');
+    if (botId == null || !mounted) return;
+    try {
+      await TransferProgress.run(
+        context,
+        '正在打包聊天记录并准备保存…',
+        () => DataTransfer.exclusive(() async {
+          final export = await DBManager().buildChatExport(botId);
+          try {
+            final saved = await DataTransfer.save(
+              export.file,
+              export.fileName,
+              'application/zip',
+            );
+            if (mounted && saved != null) {
+              GlobalNotice.show(
+                export.missingMedia == 0
+                    ? '聊天记录已导出'
+                    : '聊天记录已导出；${export.missingMedia} 处媒体引用已失效，文字和现有附件已保留',
+              );
+              TideHaptics.confirm();
+            }
+          } finally {
+            await export.file.parent.delete(recursive: true);
           }
-        }
-      });
+        }),
+      );
+    } catch (e) {
+      if (mounted) {
+        GlobalNotice.show('导出失败：$e', color: const Color(0xFFE74C3C));
+        TideHaptics.error();
+      }
+    }
+  });
   Future<void> _importSelectedChat() => TransferProgress.guard(() async {
-        final botId = await _pickDataBot('选择要导入到的机器人');
-        if (botId == null || !mounted) return;
-        final confirmed = await _confirmDataOverwrite('聊天记录');
-        if (!confirmed || !mounted) return;
-        try {
-          final count = await TransferProgress.run<int?>(
-            context,
-            '正在读取并导入聊天记录…',
-            () => DataTransfer.pickImport<int>(const [
-              'zip',
-              'json',
-            ], (path) => DBManager().importBotChat(botId, path)),
-          );
-          if (!mounted || count == null) return;
-          GlobalNotice.show('已导入 $count 条聊天记录');
-          TideHaptics.confirm();
-        } catch (e) {
-          if (mounted) {
-            GlobalNotice.show('导入失败：$e', color: const Color(0xFFE74C3C));
-            TideHaptics.error();
-          }
-        }
-      });
+    final botId = await _pickDataBot('选择要导入到的机器人');
+    if (botId == null || !mounted) return;
+    final confirmed = await _confirmDataOverwrite('聊天记录');
+    if (!confirmed || !mounted) return;
+    try {
+      final count = await TransferProgress.run<int?>(
+        context,
+        '正在读取并导入聊天记录…',
+        () => DataTransfer.pickImport<int>(const [
+          'zip',
+          'json',
+        ], (path) => DBManager().importBotChat(botId, path)),
+      );
+      if (!mounted || count == null) return;
+      GlobalNotice.show('已导入 $count 条聊天记录');
+      TideHaptics.confirm();
+    } catch (e) {
+      if (mounted) {
+        GlobalNotice.show('导入失败：$e', color: const Color(0xFFE74C3C));
+        TideHaptics.error();
+      }
+    }
+  });
   Future<bool> _confirmDataOverwrite(String label) async {
     final result = await TideDialogs.show<bool>(
       context: context,
@@ -430,105 +427,100 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _exportSelectedMemory() => TransferProgress.guard(() async {
-        final botId = await _pickDataBot('选择要导出世界书的机器人');
-        if (botId == null || !mounted) return;
-        try {
-          await TransferProgress.run(
-            context,
-            '正在导出世界书并准备保存…',
-            () => DataTransfer.exclusive(() async {
-              final export = await DBManager().buildMemoryExport(botId);
-              try {
-                final saved = await DataTransfer.save(
-                  export.file,
-                  export.fileName,
-                  'application/json',
-                );
-                if (mounted && saved != null) GlobalNotice.show('世界书已导出');
-              } finally {
-                await export.file.parent.delete(recursive: true);
-              }
-            }),
-          );
-        } catch (e) {
-          if (!mounted) return;
-          GlobalNotice.show('导出失败：$e', color: const Color(0xFFE74C3C));
-        }
-      });
+    final botId = await _pickDataBot('选择要导出世界书的机器人');
+    if (botId == null || !mounted) return;
+    try {
+      await TransferProgress.run(
+        context,
+        '正在导出世界书并准备保存…',
+        () => DataTransfer.exclusive(() async {
+          final export = await DBManager().buildMemoryExport(botId);
+          try {
+            final saved = await DataTransfer.save(
+              export.file,
+              export.fileName,
+              'application/json',
+            );
+            if (mounted && saved != null) GlobalNotice.show('世界书已导出');
+          } finally {
+            await export.file.parent.delete(recursive: true);
+          }
+        }),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      GlobalNotice.show('导出失败：$e', color: const Color(0xFFE74C3C));
+    }
+  });
   Future<void> _importSelectedMemory() => TransferProgress.guard(() async {
-        final botId = await _pickDataBot('选择要导入世界书的机器人');
-        if (botId == null || !mounted) return;
+    final botId = await _pickDataBot('选择要导入世界书的机器人');
+    if (botId == null || !mounted) return;
 
-        // 弹窗选择合并/覆盖
-        final mode = await showTideSheet<String>(
-          context: context,
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  '选择导入方式',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                    fontFamily: 'TideFont',
-                  ),
-                ),
-                const SizedBox(height: 20),
-                ListTile(
-                  leading: const Icon(Icons.merge_rounded),
-                  title: const Text('合并',
-                      style: TextStyle(fontFamily: 'TideFont')),
-                  subtitle: const Text(
-                    '保留现有世界书，按时间智能插入新内容',
-                    style: TextStyle(fontFamily: 'TideFont', fontSize: 12),
-                  ),
-                  onTap: () => Navigator.pop(context, 'merge'),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.sync_rounded),
-                  title: const Text('覆盖',
-                      style: TextStyle(fontFamily: 'TideFont')),
-                  subtitle: const Text(
-                    '删除现有世界书，完全替换为导入内容',
-                    style: TextStyle(fontFamily: 'TideFont', fontSize: 12),
-                  ),
-                  onTap: () => Navigator.pop(context, 'overwrite'),
-                ),
-                const SizedBox(height: 12),
-                TideDialogs.glassButton('取消',
-                    onTap: () => Navigator.pop(context)),
-              ],
+    // 弹窗选择合并/覆盖
+    final mode = await showTideSheet<String>(
+      context: context,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              '选择导入方式',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                fontFamily: 'TideFont',
+              ),
             ),
-          ),
-        );
+            const SizedBox(height: 20),
+            ListTile(
+              leading: const Icon(Icons.merge_rounded),
+              title: const Text('合并', style: TextStyle(fontFamily: 'TideFont')),
+              subtitle: const Text(
+                '保留现有世界书，按时间智能插入新内容',
+                style: TextStyle(fontFamily: 'TideFont', fontSize: 12),
+              ),
+              onTap: () => Navigator.pop(context, 'merge'),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.sync_rounded),
+              title: const Text('覆盖', style: TextStyle(fontFamily: 'TideFont')),
+              subtitle: const Text(
+                '删除现有世界书，完全替换为导入内容',
+                style: TextStyle(fontFamily: 'TideFont', fontSize: 12),
+              ),
+              onTap: () => Navigator.pop(context, 'overwrite'),
+            ),
+            const SizedBox(height: 12),
+            TideDialogs.glassButton('取消', onTap: () => Navigator.pop(context)),
+          ],
+        ),
+      ),
+    );
 
-        if (mode == null || !mounted) return;
-        try {
-          final count = await TransferProgress.run<int?>(
-            context,
-            '正在读取并导入世界书…',
-            () => DataTransfer.pickImport<int>(
-              const ['json'],
-              (path) => DBManager()
-                  .importBotMemory(botId, path, merge: mode == 'merge'),
-            ),
-          );
-          if (!mounted || count == null) return;
-          GlobalNotice.show(
-            mode == 'merge' ? '已合并导入 $count 条世界书' : '已覆盖导入 $count 条世界书',
-          );
-          TideHaptics.confirm();
-        } on FormatException catch (e) {
-          if (mounted)
-            GlobalNotice.show(e.message, color: const Color(0xFFE74C3C));
-        } catch (e) {
-          if (mounted)
-            GlobalNotice.show('导入失败：$e', color: const Color(0xFFE74C3C));
-        }
-      });
+    if (mode == null || !mounted) return;
+    try {
+      final count = await TransferProgress.run<int?>(
+        context,
+        '正在读取并导入世界书…',
+        () => DataTransfer.pickImport<int>(
+          const ['json'],
+          (path) =>
+              DBManager().importBotMemory(botId, path, merge: mode == 'merge'),
+        ),
+      );
+      if (!mounted || count == null) return;
+      GlobalNotice.show(
+        mode == 'merge' ? '已合并导入 $count 条世界书' : '已覆盖导入 $count 条世界书',
+      );
+      TideHaptics.confirm();
+    } on FormatException catch (e) {
+      if (mounted) GlobalNotice.show(e.message, color: const Color(0xFFE74C3C));
+    } catch (e) {
+      if (mounted) GlobalNotice.show('导入失败：$e', color: const Color(0xFFE74C3C));
+    }
+  });
 
   void _onSetting(Map<String, dynamic> s) {
     switch (s['page']) {
@@ -733,9 +725,9 @@ class _ProfilePageState extends State<ProfilePage> {
         );
         break;
       case 'support':
-        Navigator.of(context).push(
-          MaterialPageRoute<void>(builder: (_) => const SupportUsPage()),
-        );
+        Navigator.of(
+          context,
+        ).push(MaterialPageRoute<void>(builder: (_) => const SupportUsPage()));
         break;
       case 'feedback':
         _openFeedback();
@@ -750,7 +742,8 @@ class _ProfilePageState extends State<ProfilePage> {
       if (await launchUrl(
         Uri.parse('https://wj.qq.com/s2/28578088/ilkl/'),
         mode: LaunchMode.externalApplication,
-      )) return;
+      ))
+        return;
     } catch (_) {
       // Keep the settings page usable if no browser can handle the link.
     }
@@ -831,8 +824,8 @@ class _ProfilePageState extends State<ProfilePage> {
                               mi == 'dark'
                                   ? Icons.dark_mode_rounded
                                   : (mi == 'auto'
-                                      ? Icons.brightness_auto_rounded
-                                      : Icons.wb_sunny_rounded),
+                                        ? Icons.brightness_auto_rounded
+                                        : Icons.wb_sunny_rounded),
                               size: 16,
                               color: t.primary,
                             ),
@@ -1200,16 +1193,19 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
       _streaming = stream != 'false';
       _segmentedReply = segmentedReply != 'false';
       _randomReplyDelay = randomReplyDelay == 'true';
-      _replyDelayMinController.text =
-          (int.tryParse(replyDelayMin ?? '') ?? 0).clamp(0, 60).toString();
-      _replyDelayMaxController.text =
-          (int.tryParse(replyDelayMax ?? '') ?? 2).clamp(0, 60).toString();
+      _replyDelayMinController.text = (int.tryParse(replyDelayMin ?? '') ?? 0)
+          .clamp(0, 60)
+          .toString();
+      _replyDelayMaxController.text = (int.tryParse(replyDelayMax ?? '') ?? 2)
+          .clamp(0, 60)
+          .toString();
       _timeAwareness = timeAwareness != 'false';
       _proactiveReply = proactiveReply != 'false';
       _botPosts = botPosts == 'true';
       _botPostsWithImages = botPostsWithImages == 'true';
-      _botPostsImageChanceController.text =
-          (botPostsImageChance ?? 50).clamp(1, 100).toString();
+      _botPostsImageChanceController.text = (botPostsImageChance ?? 50)
+          .clamp(1, 100)
+          .toString();
       _lifeSchedule = lifeSchedule != 'false';
       _imageGeneration = imageGeneration != 'false';
       // 自定义风格是任意文本（如“水彩插画”），不能只按预设白名单判定；
@@ -1229,8 +1225,9 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
       _voiceReplyChanceController.text = _voiceReplyChance.toString();
       _stickerChance = (stickerChance ?? 50).clamp(1, 100);
       _stickerChanceController.text = _stickerChance.toString();
-      _botPostsPerDayController.text =
-          (botPostsPerDay ?? 1).clamp(1, 10).toString();
+      _botPostsPerDayController.text = (botPostsPerDay ?? 1)
+          .clamp(1, 10)
+          .toString();
       _proactiveMin = (proactiveMin ?? 60).clamp(1, 1440);
       _proactiveMax = (proactiveMax ?? 90).clamp(_proactiveMin, 1440);
       _proactiveMinController.text = _proactiveMin.toString();
@@ -1374,66 +1371,65 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
     required bool value,
     required ValueChanged<bool> onChanged,
     Widget? child,
-  }) =>
-      Column(
-        children: [
-          SwitchListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-            title: Row(
-              children: [
-                Text(title, style: const TextStyle(fontFamily: 'TideFont')),
-                if (help != null)
-                  IconButton(
-                    icon: Icon(
-                      Icons.help_outline_rounded,
-                      size: 18,
-                      color: theme.textWeak,
-                    ),
-                    tooltip: '说明',
-                    onPressed: () => TideDialogs.show(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        backgroundColor: theme.surface,
-                        title: Text(
-                          title,
-                          style: TextStyle(
-                            color: theme.textStrong,
-                            fontFamily: 'TideFont',
-                          ),
-                        ),
-                        content: Text(
-                          help,
-                          style: TextStyle(
-                            color: theme.textWeak,
-                            fontFamily: 'TideFont',
-                            height: 1.5,
-                          ),
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(ctx),
-                            child: const Text(
-                              '知道了',
-                              style: TextStyle(fontFamily: 'TideFont'),
-                            ),
-                          ),
-                        ],
+  }) => Column(
+    children: [
+      SwitchListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+        title: Row(
+          children: [
+            Text(title, style: const TextStyle(fontFamily: 'TideFont')),
+            if (help != null)
+              IconButton(
+                icon: Icon(
+                  Icons.help_outline_rounded,
+                  size: 18,
+                  color: theme.textWeak,
+                ),
+                tooltip: '说明',
+                onPressed: () => TideDialogs.show(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    backgroundColor: theme.surface,
+                    title: Text(
+                      title,
+                      style: TextStyle(
+                        color: theme.textStrong,
+                        fontFamily: 'TideFont',
                       ),
                     ),
+                    content: Text(
+                      help,
+                      style: TextStyle(
+                        color: theme.textWeak,
+                        fontFamily: 'TideFont',
+                        height: 1.5,
+                      ),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text(
+                          '知道了',
+                          style: TextStyle(fontFamily: 'TideFont'),
+                        ),
+                      ),
+                    ],
                   ),
-              ],
-            ),
-            value: value,
-            activeThumbColor: theme.primary,
-            onChanged: onChanged,
-          ),
-          if (child != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: child,
-            ),
-        ],
-      );
+                ),
+              ),
+          ],
+        ),
+        value: value,
+        activeThumbColor: theme.primary,
+        onChanged: onChanged,
+      ),
+      if (child != null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: child,
+        ),
+    ],
+  );
 
   InputDecoration _roundInput(
     TideTheme theme, {
@@ -1459,92 +1455,92 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
   }
 
   Widget _replyDelayRange(TideTheme theme) => Row(
-        children: [
-          Expanded(
-            child: TextField(
-              contextMenuBuilder: androidTextContextMenu,
-              controller: _replyDelayMinController,
-              keyboardType: TextInputType.number,
-              style: TextStyle(color: theme.textStrong, fontFamily: 'TideFont'),
-              decoration: _roundInput(theme, label: '最短（秒）'),
-              onChanged: (value) {
-                final n = int.tryParse(value);
-                final max = int.tryParse(_replyDelayMaxController.text) ?? 2;
-                if (n != null && n >= 0 && n <= max && n <= 60) {
-                  _save('random_reply_delay_min_seconds', '$n');
-                }
-              },
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Text(
-              '至',
-              style: TextStyle(color: theme.textWeak, fontFamily: 'TideFont'),
-            ),
-          ),
-          Expanded(
-            child: TextField(
-              contextMenuBuilder: androidTextContextMenu,
-              controller: _replyDelayMaxController,
-              keyboardType: TextInputType.number,
-              style: TextStyle(color: theme.textStrong, fontFamily: 'TideFont'),
-              decoration: _roundInput(theme, label: '最长（秒）'),
-              onChanged: (value) {
-                final n = int.tryParse(value);
-                final min = int.tryParse(_replyDelayMinController.text) ?? 0;
-                if (n != null && n >= min && n <= 60) {
-                  _save('random_reply_delay_max_seconds', '$n');
-                }
-              },
-            ),
-          ),
-        ],
-      );
+    children: [
+      Expanded(
+        child: TextField(
+          contextMenuBuilder: androidTextContextMenu,
+          controller: _replyDelayMinController,
+          keyboardType: TextInputType.number,
+          style: TextStyle(color: theme.textStrong, fontFamily: 'TideFont'),
+          decoration: _roundInput(theme, label: '最短（秒）'),
+          onChanged: (value) {
+            final n = int.tryParse(value);
+            final max = int.tryParse(_replyDelayMaxController.text) ?? 2;
+            if (n != null && n >= 0 && n <= max && n <= 60) {
+              _save('random_reply_delay_min_seconds', '$n');
+            }
+          },
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Text(
+          '至',
+          style: TextStyle(color: theme.textWeak, fontFamily: 'TideFont'),
+        ),
+      ),
+      Expanded(
+        child: TextField(
+          contextMenuBuilder: androidTextContextMenu,
+          controller: _replyDelayMaxController,
+          keyboardType: TextInputType.number,
+          style: TextStyle(color: theme.textStrong, fontFamily: 'TideFont'),
+          decoration: _roundInput(theme, label: '最长（秒）'),
+          onChanged: (value) {
+            final n = int.tryParse(value);
+            final min = int.tryParse(_replyDelayMinController.text) ?? 0;
+            if (n != null && n >= min && n <= 60) {
+              _save('random_reply_delay_max_seconds', '$n');
+            }
+          },
+        ),
+      ),
+    ],
+  );
 
   Widget _compactRange(TideTheme theme) => Row(
-        children: [
-          Expanded(
-            child: TextField(
-              contextMenuBuilder: androidTextContextMenu,
-              controller: _proactiveMinController,
-              keyboardType: TextInputType.number,
-              style: TextStyle(color: theme.textStrong, fontFamily: 'TideFont'),
-              decoration: _roundInput(theme, label: '最短（分钟）'),
-              onChanged: (v) {
-                final n = int.tryParse(v);
-                if (n != null && n >= 1 && n <= _proactiveMax) {
-                  _proactiveMin = n;
-                  _save('proactive_min_minutes', '$n');
-                }
-              },
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Text(
-              '至',
-              style: TextStyle(color: theme.textWeak, fontFamily: 'TideFont'),
-            ),
-          ),
-          Expanded(
-            child: TextField(
-              contextMenuBuilder: androidTextContextMenu,
-              controller: _proactiveMaxController,
-              keyboardType: TextInputType.number,
-              style: TextStyle(color: theme.textStrong, fontFamily: 'TideFont'),
-              decoration: _roundInput(theme, label: '最长（分钟）'),
-              onChanged: (v) {
-                final n = int.tryParse(v);
-                if (n != null && n >= _proactiveMin && n <= 1440) {
-                  _proactiveMax = n;
-                  _save('proactive_max_minutes', '$n');
-                }
-              },
-            ),
-          ),
-        ],
-      );
+    children: [
+      Expanded(
+        child: TextField(
+          contextMenuBuilder: androidTextContextMenu,
+          controller: _proactiveMinController,
+          keyboardType: TextInputType.number,
+          style: TextStyle(color: theme.textStrong, fontFamily: 'TideFont'),
+          decoration: _roundInput(theme, label: '最短（分钟）'),
+          onChanged: (v) {
+            final n = int.tryParse(v);
+            if (n != null && n >= 1 && n <= _proactiveMax) {
+              _proactiveMin = n;
+              _save('proactive_min_minutes', '$n');
+            }
+          },
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Text(
+          '至',
+          style: TextStyle(color: theme.textWeak, fontFamily: 'TideFont'),
+        ),
+      ),
+      Expanded(
+        child: TextField(
+          contextMenuBuilder: androidTextContextMenu,
+          controller: _proactiveMaxController,
+          keyboardType: TextInputType.number,
+          style: TextStyle(color: theme.textStrong, fontFamily: 'TideFont'),
+          decoration: _roundInput(theme, label: '最长（分钟）'),
+          onChanged: (v) {
+            final n = int.tryParse(v);
+            if (n != null && n >= _proactiveMin && n <= 1440) {
+              _proactiveMax = n;
+              _save('proactive_max_minutes', '$n');
+            }
+          },
+        ),
+      ),
+    ],
+  );
 
   Future<void> _manageLifePools() async {
     final current = await LifeScheduleService.instance.pools();
@@ -1558,40 +1554,39 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
   }
 
   Widget _compactPostsPerDay(TideTheme theme) => TextField(
-        contextMenuBuilder: androidTextContextMenu,
-        controller: _botPostsPerDayController,
-        keyboardType: TextInputType.number,
-        style: TextStyle(color: theme.textStrong, fontFamily: 'TideFont'),
-        decoration: _roundInput(
-          theme,
-          label: '每个机器人每天发布数量（1–10）',
-          icon:
-              Icon(Icons.dynamic_feed_rounded, color: theme.primary, size: 19),
-        ),
-        onChanged: (v) {
-          final n = int.tryParse(v);
-          if (n != null && n >= 1 && n <= 10) _save('bot_posts_per_day', '$n');
-        },
-      );
+    contextMenuBuilder: androidTextContextMenu,
+    controller: _botPostsPerDayController,
+    keyboardType: TextInputType.number,
+    style: TextStyle(color: theme.textStrong, fontFamily: 'TideFont'),
+    decoration: _roundInput(
+      theme,
+      label: '每个机器人每天发布数量（1–10）',
+      icon: Icon(Icons.dynamic_feed_rounded, color: theme.primary, size: 19),
+    ),
+    onChanged: (v) {
+      final n = int.tryParse(v);
+      if (n != null && n >= 1 && n <= 10) _save('bot_posts_per_day', '$n');
+    },
+  );
 
   Widget _compactSpeed(TideTheme theme) => TextField(
-        contextMenuBuilder: androidTextContextMenu,
-        controller: _streamSpeedController,
-        keyboardType: TextInputType.number,
-        style: TextStyle(color: theme.textStrong, fontFamily: 'TideFont'),
-        decoration: _roundInput(
-          theme,
-          label: '显示速度（1–100）',
-          icon: Icon(Icons.speed_rounded, color: theme.primary, size: 19),
-        ),
-        onChanged: (v) {
-          final n = int.tryParse(v);
-          if (n != null && n >= 1 && n <= 100) {
-            _speed = n;
-            _save('streaming_speed', '$n');
-          }
-        },
-      );
+    contextMenuBuilder: androidTextContextMenu,
+    controller: _streamSpeedController,
+    keyboardType: TextInputType.number,
+    style: TextStyle(color: theme.textStrong, fontFamily: 'TideFont'),
+    decoration: _roundInput(
+      theme,
+      label: '显示速度（1–100）',
+      icon: Icon(Icons.speed_rounded, color: theme.primary, size: 19),
+    ),
+    onChanged: (v) {
+      final n = int.tryParse(v);
+      if (n != null && n >= 1 && n <= 100) {
+        _speed = n;
+        _save('streaming_speed', '$n');
+      }
+    },
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -1777,29 +1772,31 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
                                   color: theme.textStrong,
                                   fontFamily: 'TideFont',
                                 ),
-                                decoration: _roundInput(
-                                  theme,
-                                  label: _searchKeyLabel(theme),
-                                  icon: Icon(
-                                    Icons.key_rounded,
-                                    color: theme.primary,
-                                  ),
-                                ).copyWith(
-                                  suffixIcon: IconButton(
-                                    tooltip: _showSearchKey
-                                        ? '隐藏 API Key'
-                                        : '显示 API Key',
-                                    onPressed: () => setState(
-                                      () => _showSearchKey = !_showSearchKey,
+                                decoration:
+                                    _roundInput(
+                                      theme,
+                                      label: _searchKeyLabel(theme),
+                                      icon: Icon(
+                                        Icons.key_rounded,
+                                        color: theme.primary,
+                                      ),
+                                    ).copyWith(
+                                      suffixIcon: IconButton(
+                                        tooltip: _showSearchKey
+                                            ? '隐藏 API Key'
+                                            : '显示 API Key',
+                                        onPressed: () => setState(
+                                          () =>
+                                              _showSearchKey = !_showSearchKey,
+                                        ),
+                                        icon: Icon(
+                                          _showSearchKey
+                                              ? Icons.visibility_off_rounded
+                                              : Icons.visibility_rounded,
+                                          color: theme.textWeak,
+                                        ),
+                                      ),
                                     ),
-                                    icon: Icon(
-                                      _showSearchKey
-                                          ? Icons.visibility_off_rounded
-                                          : Icons.visibility_rounded,
-                                      color: theme.textWeak,
-                                    ),
-                                  ),
-                                ),
                                 onChanged: (value) =>
                                     _save('web_search_api_key', value.trim()),
                               ),
@@ -1859,8 +1856,7 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
                                           ? ''
                                           : _imageStyle,
                                     );
-                                    final custom =
-                                        await TideDialogs.show<String>(
+                                    final custom = await TideDialogs.show<String>(
                                       context: context,
                                       builder: (ctx) => AlertDialog(
                                         backgroundColor: Colors.transparent,
@@ -1892,21 +1888,23 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
                                                 Expanded(
                                                   child:
                                                       TideDialogs.glassButton(
-                                                    '取消',
-                                                    onTap: () =>
-                                                        Navigator.pop(ctx),
-                                                  ),
+                                                        '取消',
+                                                        onTap: () =>
+                                                            Navigator.pop(ctx),
+                                                      ),
                                                 ),
                                                 const SizedBox(width: 10),
                                                 Expanded(
                                                   child:
                                                       TideDialogs.glassButton(
-                                                    '保存',
-                                                    onTap: () => Navigator.pop(
-                                                      ctx,
-                                                      controller.text.trim(),
-                                                    ),
-                                                  ),
+                                                        '保存',
+                                                        onTap: () =>
+                                                            Navigator.pop(
+                                                              ctx,
+                                                              controller.text
+                                                                  .trim(),
+                                                            ),
+                                                      ),
                                                 ),
                                               ],
                                             ),
@@ -2479,8 +2477,9 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
     if (sttRaw != null && sttRaw.isNotEmpty) {
       try {
         final decoded = jsonDecode(sttRaw) as List;
-        sttList =
-            decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        sttList = decoded
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
       } catch (_) {}
     }
     if (ttsRaw != null && ttsRaw.isNotEmpty) {
@@ -2770,6 +2769,8 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
     final uCtrl = TextEditingController(text: url);
     final kCtrl = TextEditingController(text: key);
     final mCtrl = TextEditingController(text: models);
+    var thinkingMode = false;
+    var reasoningEffort = 'medium';
     TideDialogs.show(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -2795,6 +2796,33 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
             _f('API Key', kCtrl, obscure: true, keyUrl: preset?['key_url']),
             const SizedBox(height: 8),
             _modelField(ctx, mCtrl, uCtrl, kCtrl),
+            if (!isTts)
+              StatefulBuilder(
+                builder: (settingContext, updateSetting) => Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: const Text('思考模式'),
+                      value: thinkingMode,
+                      onChanged: (value) =>
+                          updateSetting(() => thinkingMode = value),
+                    ),
+                    AnimatedSize(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      child: thinkingMode
+                          ? ReasoningControl(
+                              value: reasoningEffort,
+                              onChanged: (value) =>
+                                  updateSetting(() => reasoningEffort = value),
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                  ],
+                ),
+              ),
             const SizedBox(height: 16),
             Row(
               children: [
@@ -2831,8 +2859,8 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
                           'url': uCtrl.text.trim(),
                           'key': kCtrl.text.trim(),
                           'model': model,
-                          'thinking_mode': false,
-                          'reasoning_effort': 'medium',
+                          'thinking_mode': thinkingMode,
+                          'reasoning_effort': reasoningEffort,
                           'id':
                               'provider_${DateTime.now().microsecondsSinceEpoch}',
                         };
@@ -2936,39 +2964,49 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
   }
 
   Widget _mimoVoiceField(
-      BuildContext ctx,
-      TextEditingController voice,
-      TextEditingController model,
-      TextEditingController url,
-      TextEditingController key,
-      Map<String, dynamic>? Function() current,
-      void Function(Map<String, dynamic>) apply) {
-    return _f('音色', voice,
-        trailing: TextButton(
-          style: TextButton.styleFrom(
-            foregroundColor: TideTheme.of(ctx).primary,
-            padding: const EdgeInsets.symmetric(horizontal: 6),
-            visualDensity: VisualDensity.compact,
-          ),
-          onPressed: () async {
-            final result = await Navigator.of(ctx, rootNavigator: true)
-                .push<Map<String, dynamic>>(MaterialPageRoute(
-              fullscreenDialog: true,
-              builder: (_) => MimoVoiceWorkbench(
-                initial: current(),
-                model: model.text,
-                fetchModels: (workbenchContext, modelController) =>
-                    _showModelPicker(
-                        workbenchContext, url, key, modelController),
-              ),
-            ));
-            if (!ctx.mounted || result == null) return;
-            apply(result);
-            model.text = result['model'] as String;
-            voice.text = mimoCloneVoice;
-          },
-          child: const Text('MiMo 音色克隆工作台', style: TextStyle(fontSize: 12)),
-        ));
+    BuildContext ctx,
+    TextEditingController voice,
+    TextEditingController model,
+    TextEditingController url,
+    TextEditingController key,
+    Map<String, dynamic>? Function() current,
+    void Function(Map<String, dynamic>) apply,
+  ) {
+    return _f(
+      '音色',
+      voice,
+      trailing: TextButton(
+        style: TextButton.styleFrom(
+          foregroundColor: TideTheme.of(ctx).primary,
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          visualDensity: VisualDensity.compact,
+        ),
+        onPressed: () async {
+          final result = await Navigator.of(ctx, rootNavigator: true)
+              .push<Map<String, dynamic>>(
+                MaterialPageRoute(
+                  fullscreenDialog: true,
+                  builder: (_) => MimoVoiceWorkbench(
+                    initial: current(),
+                    model: model.text,
+                    fetchModels: (workbenchContext, modelController) =>
+                        _showModelPicker(
+                          workbenchContext,
+                          url,
+                          key,
+                          modelController,
+                        ),
+                  ),
+                ),
+              );
+          if (!ctx.mounted || result == null) return;
+          apply(result);
+          model.text = result['model'] as String;
+          voice.text = mimoCloneVoice;
+        },
+        child: const Text('MiMo 音色克隆工作台', style: TextStyle(fontSize: 12)),
+      ),
+    );
   }
 
   void _showTtsDialog(
@@ -2986,7 +3024,8 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
     final mCtrl = TextEditingController(text: models);
     final vCtrl = TextEditingController(text: voice);
     Map<String, dynamic>? clone;
-    var supportsInstructions = false;
+    final nativeInstructions = protocol == 'mimo' || protocol == 'minimax';
+    var supportsInstructions = nativeInstructions;
     TideDialogs.show(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -3014,29 +3053,29 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
             _modelField(ctx, mCtrl, uCtrl, kCtrl),
             const SizedBox(height: 8),
             if (protocol == 'mimo')
-              _mimoVoiceField(ctx, vCtrl, mCtrl, uCtrl, kCtrl, () => clone,
-                  (value) => clone = value)
+              _mimoVoiceField(
+                ctx,
+                vCtrl,
+                mCtrl,
+                uCtrl,
+                kCtrl,
+                () => clone,
+                (value) => clone = value,
+              )
             else
               _f('音色', vCtrl),
             const SizedBox(height: 8),
-            Text(
-              protocol == 'mimo'
-                  ? '支持独立语气指令，保持所选音色。'
-                  : protocol == 'minimax'
-                      ? '按模型支持情况使用原生情绪与语速。'
-                      : 'CosyVoice2 预设自动适配情绪；其他兼容接口默认仅调整语速。',
-            ),
-            if (protocol == 'openai')
-              StatefulBuilder(
-                builder: (context, update) => SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  activeThumbColor: TideTheme.of(context).primary,
-                  title: const Text('支持语气指令'),
-                  subtitle: const Text('仅在接口文档明确支持 instructions 时开启'),
-                  value: supportsInstructions,
-                  onChanged: (v) => update(() => supportsInstructions = v),
-                ),
+            StatefulBuilder(
+              builder: (context, update) => SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                activeThumbColor: TideTheme.of(context).primary,
+                title: const Text('支持语气指令'),
+                value: supportsInstructions,
+                onChanged: nativeInstructions
+                    ? null
+                    : (v) => update(() => supportsInstructions = v),
               ),
+            ),
             const SizedBox(height: 16),
             Row(
               children: [
@@ -3116,20 +3155,22 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
     Object? lastError;
     for (final candidate in candidates.toSet()) {
       try {
-        final response = await http.get(
-          Uri.parse('$candidate/models'),
-          headers: {
-            'Authorization': 'Bearer ${apiKey.trim()}',
-            if (Uri.parse(candidate).host == 'api.xiaomimimo.com')
-              'api-key': apiKey.trim(),
-            'Accept': 'application/json',
-          },
-        ).timeout(const Duration(seconds: 75));
+        final response = await http
+            .get(
+              Uri.parse('$candidate/models'),
+              headers: {
+                'Authorization': 'Bearer ${apiKey.trim()}',
+                if (Uri.parse(candidate).host == 'api.xiaomimimo.com')
+                  'api-key': apiKey.trim(),
+                'Accept': 'application/json',
+              },
+            )
+            .timeout(const Duration(seconds: 75));
         if (response.statusCode < 200 || response.statusCode >= 300) {
           if (response.statusCode == 429 || response.statusCode >= 500) {
             final retryAfter =
                 int.tryParse(response.headers['retry-after']?.trim() ?? '') ??
-                    0;
+                0;
             await Future<void>.delayed(
               Duration(seconds: retryAfter.clamp(1, 15)),
             );
@@ -3145,19 +3186,20 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
             ? rows
             : (rows is Map ? (rows['data'] ?? rows['models']) : null);
         if (list is List) {
-          final models = list
-              .map((item) {
-                if (item is String) return item.trim();
-                if (item is Map)
-                  return (item['id'] ?? item['name'] ?? item['model'] ?? '')
-                      .toString()
-                      .trim();
-                return '';
-              })
-              .where((id) => id.isNotEmpty)
-              .toSet()
-              .toList()
-            ..sort();
+          final models =
+              list
+                  .map((item) {
+                    if (item is String) return item.trim();
+                    if (item is Map)
+                      return (item['id'] ?? item['name'] ?? item['model'] ?? '')
+                          .toString()
+                          .trim();
+                    return '';
+                  })
+                  .where((id) => id.isNotEmpty)
+                  .toSet()
+                  .toList()
+                ..sort();
           if (models.isNotEmpty) return models;
         }
       } catch (e) {
@@ -3336,103 +3378,101 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
                             ),
                           )
                         : error != null
-                            ? Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(24),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.cloud_off_rounded,
-                                        size: 30,
-                                        color: theme.textWeak,
-                                      ),
-                                      const SizedBox(height: 10),
-                                      Text(
-                                        '获取模型失败',
-                                        style: TextStyle(
-                                          color: theme.textStrong,
-                                          fontFamily: 'TideFont',
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        error!,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                        textAlign: TextAlign.center,
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: theme.textWeak,
-                                          fontFamily: 'TideFont',
-                                        ),
-                                      ),
-                                      const SizedBox(height: 12),
-                                      OutlinedButton.icon(
-                                        onPressed: () {
-                                          loadStarted = false;
-                                          load();
-                                        },
-                                        icon: const Icon(
-                                          Icons.refresh_rounded,
-                                          size: 18,
-                                        ),
-                                        label: const Text('重试'),
-                                      ),
-                                    ],
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.cloud_off_rounded,
+                                    size: 30,
+                                    color: theme.textWeak,
                                   ),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    '获取模型失败',
+                                    style: TextStyle(
+                                      color: theme.textStrong,
+                                      fontFamily: 'TideFont',
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    error!,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: theme.textWeak,
+                                      fontFamily: 'TideFont',
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  OutlinedButton.icon(
+                                    onPressed: () {
+                                      loadStarted = false;
+                                      load();
+                                    },
+                                    icon: const Icon(
+                                      Icons.refresh_rounded,
+                                      size: 18,
+                                    ),
+                                    label: const Text('重试'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : visible.isEmpty
+                        ? Center(
+                            child: Text(
+                              '没有匹配的模型',
+                              style: TextStyle(
+                                color: theme.textWeak,
+                                fontFamily: 'TideFont',
+                              ),
+                            ),
+                          )
+                        : ListView.separated(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            itemCount: visible.length,
+                            separatorBuilder: (_, __) => Divider(
+                              height: 1,
+                              indent: 14,
+                              endIndent: 14,
+                              color: theme.textFaint.withValues(alpha: .16),
+                            ),
+                            itemBuilder: (_, index) => ListTile(
+                              dense: true,
+                              visualDensity: VisualDensity.compact,
+                              leading: Icon(
+                                Icons.auto_awesome_rounded,
+                                size: 18,
+                                color: theme.primary,
+                              ),
+                              title: Text(
+                                visible[index],
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: theme.textStrong,
+                                  fontFamily: 'TideFont',
                                 ),
-                              )
-                            : visible.isEmpty
-                                ? Center(
-                                    child: Text(
-                                      '没有匹配的模型',
-                                      style: TextStyle(
-                                        color: theme.textWeak,
-                                        fontFamily: 'TideFont',
-                                      ),
-                                    ),
-                                  )
-                                : ListView.separated(
-                                    padding:
-                                        const EdgeInsets.symmetric(vertical: 4),
-                                    itemCount: visible.length,
-                                    separatorBuilder: (_, __) => Divider(
-                                      height: 1,
-                                      indent: 14,
-                                      endIndent: 14,
-                                      color: theme.textFaint
-                                          .withValues(alpha: .16),
-                                    ),
-                                    itemBuilder: (_, index) => ListTile(
-                                      dense: true,
-                                      visualDensity: VisualDensity.compact,
-                                      leading: Icon(
-                                        Icons.auto_awesome_rounded,
-                                        size: 18,
-                                        color: theme.primary,
-                                      ),
-                                      title: Text(
-                                        visible[index],
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          color: theme.textStrong,
-                                          fontFamily: 'TideFont',
-                                        ),
-                                      ),
-                                      trailing: modelCtrl.text == visible[index]
-                                          ? Icon(
-                                              Icons.check_circle_rounded,
-                                              size: 18,
-                                              color: theme.primary,
-                                            )
-                                          : null,
-                                      onTap: () {
-                                        modelCtrl.text = visible[index];
-                                        Navigator.pop(pickerContext);
-                                      },
-                                    ),
-                                  ),
+                              ),
+                              trailing: modelCtrl.text == visible[index]
+                                  ? Icon(
+                                      Icons.check_circle_rounded,
+                                      size: 18,
+                                      color: theme.primary,
+                                    )
+                                  : null,
+                              onTap: () {
+                                modelCtrl.text = visible[index];
+                                Navigator.pop(pickerContext);
+                              },
+                            ),
+                          ),
                   ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
@@ -3527,10 +3567,10 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
   }
 
   Iterable<Map<String, String>> get _allProviderPresets => [
-        ..._presets,
-        ..._sttPresets,
-        ..._ttsPresets,
-      ];
+    ..._presets,
+    ..._sttPresets,
+    ..._ttsPresets,
+  ];
 
   Map<String, String>? _findPreset(String name, String url) {
     for (final preset in _allProviderPresets) {
@@ -3583,14 +3623,15 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
             Row(
               children: [
                 Expanded(
-                    child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: TideTheme.of(context).textWeak,
-                    fontFamily: 'TideFont',
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: TideTheme.of(context).textWeak,
+                      fontFamily: 'TideFont',
+                    ),
                   ),
-                )),
+                ),
                 if (trailing != null) trailing,
                 if (keyUrl != null)
                   TextButton(
@@ -3651,16 +3692,27 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
     final kCtrl = TextEditingController(text: p['key']);
     final mCtrl = TextEditingController(text: p['model']);
     var thinkingMode = p['thinking_mode'] == true;
-    var reasoningEffort = ['low', 'medium', 'high', 'xhigh', 'max']
-            .contains(p['reasoning_effort'])
+    var reasoningEffort =
+        [
+          'low',
+          'medium',
+          'high',
+          'xhigh',
+          'max',
+        ].contains(p['reasoning_effort'])
         ? p['reasoning_effort'].toString()
         : 'medium';
     final hasVoice = p.containsKey('voice');
+    final nativeInstructions =
+        p['protocol'] == 'mimo' || p['protocol'] == 'minimax';
+    var supportsInstructions =
+        nativeInstructions || p['supports_instructions'] == true;
     Map<String, dynamic>? clone = p['mimo_clone'] is Map
         ? Map<String, dynamic>.from(p['mimo_clone'] as Map)
         : null;
     final vCtrl = TextEditingController(text: p['voice']?.toString() ?? '');
-    final isDashScope = hasVoice &&
+    final isDashScope =
+        hasVoice &&
         (p['name']?.toString().contains('百炼') == true ||
             p['url']?.toString().contains('dashscope.aliyuncs.com') == true);
     TideDialogs.show(
@@ -3709,9 +3761,8 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
                       child: thinkingMode
                           ? ReasoningControl(
                               value: reasoningEffort,
-                              onChanged: (value) => updateSetting(
-                                () => reasoningEffort = value,
-                              ),
+                              onChanged: (value) =>
+                                  updateSetting(() => reasoningEffort = value),
                             )
                           : const SizedBox.shrink(),
                     ),
@@ -3721,10 +3772,28 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
             if (hasVoice) ...[
               const SizedBox(height: 8),
               if (p['protocol'] == 'mimo')
-                _mimoVoiceField(ctx, vCtrl, mCtrl, uCtrl, kCtrl, () => clone,
-                    (value) => clone = value)
+                _mimoVoiceField(
+                  ctx,
+                  vCtrl,
+                  mCtrl,
+                  uCtrl,
+                  kCtrl,
+                  () => clone,
+                  (value) => clone = value,
+                )
               else
                 _f('音色', vCtrl),
+              StatefulBuilder(
+                builder: (context, update) => SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  activeThumbColor: TideTheme.of(context).primary,
+                  title: const Text('支持语气指令'),
+                  value: supportsInstructions,
+                  onChanged: nativeInstructions
+                      ? null
+                      : (value) => update(() => supportsInstructions = value),
+                ),
+              ),
             ],
             const SizedBox(height: 16),
             Row(
@@ -3743,7 +3812,9 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
                     '保存',
                     onTap: () {
                       if (isMimoClone(
-                              p['protocol']?.toString() ?? '', vCtrl.text) &&
+                            p['protocol']?.toString() ?? '',
+                            vCtrl.text,
+                          ) &&
                           clone == null) {
                         GlobalNotice.show('请先在 MiMo 音色克隆工作台应用参考音频');
                         return;
@@ -3764,7 +3835,10 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
                         p['thinking_mode'] = thinkingMode;
                         p['reasoning_effort'] = reasoningEffort;
                       }
-                      if (hasVoice) p['voice'] = vCtrl.text.trim();
+                      if (hasVoice) {
+                        p['voice'] = vCtrl.text.trim();
+                        p['supports_instructions'] = supportsInstructions;
+                      }
                       if (clone != null) p['mimo_clone'] = clone;
                       Navigator.pop(ctx);
                       _saveList();
@@ -3781,8 +3855,9 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
   }
 
   void _deleteProvider(int idx, {bool isTts = false, bool isStt = false}) {
-    final collection =
-        isStt ? _sttProviders : (isTts ? _ttsProviders : _providers);
+    final collection = isStt
+        ? _sttProviders
+        : (isTts ? _ttsProviders : _providers);
     final name = collection[idx]['name'];
     TideDialogs.show(
       context: context,
@@ -3924,425 +3999,412 @@ class _ApiSettingsPageState extends State<ApiSettingsPage> {
 
   @override
   Widget build(BuildContext context) => TideBackground(
-        child: Scaffold(
-          backgroundColor: Colors.transparent,
-          appBar: AppBar(
-            title: const Text(
-              'API 设置',
-              style: TextStyle(
-                  fontWeight: FontWeight.w600, fontFamily: 'TideFont'),
-            ),
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            leading: IconButton(
-              icon: const Icon(Icons.arrow_back_ios_rounded, size: 20),
-              onPressed: () => Navigator.pop(context),
-            ),
-            actions: [
-              IconButton(
-                icon: Icon(
-                  Icons.add_circle_outline_rounded,
-                  color: TideTheme.of(context).primary,
-                  size: 26,
-                ),
-                onPressed: _addProvider,
-              ),
-            ],
-          ),
-          body: _loading
-              ? Center(
-                  child: CircularProgressIndicator(
-                    color: TideTheme.of(context).primary,
-                  ),
-                )
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (_providers.isEmpty &&
-                          _sttProviders.isEmpty &&
-                          _ttsProviders.isEmpty)
-                        Center(
-                          child: Padding(
-                            padding: const EdgeInsets.only(top: 80),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(
-                                  Icons.api_rounded,
-                                  size: 60,
-                                  color: Color(0xFFC7C7CC),
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  '还没有添加任何模型提供商',
-                                  style: TextStyle(
-                                    fontSize: 15,
-                                    color: TideTheme.of(context).textWeak,
-                                    fontFamily: 'TideFont',
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  '点击右上角 + 添加',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: TideTheme.of(context).textFaint,
-                                    fontFamily: 'TideFont',
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      if (_providers.isNotEmpty) ...[
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8, bottom: 8),
-                          child: Text(
-                            'AI 模型',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              fontFamily: 'TideFont',
-                              color: TideTheme.of(context).textStrong,
-                            ),
-                          ),
-                        ),
-                        ...List.generate(_providers.length, (i) {
-                          final p = _providers[i];
-                          return BouncyTap(
-                            onTap: () => _editProvider(p),
-                            child: FrostCard(
-                              margin: const EdgeInsets.only(bottom: 10),
-                              padding: const EdgeInsets.all(14),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          p['name'] ?? '',
-                                          style: const TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w600,
-                                            fontFamily: 'TideFont',
-                                          ),
-                                        ),
-                                      ),
-                                      BouncyTap(
-                                        onTap: () => _testProvider(p),
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 10,
-                                            vertical: 4,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            borderRadius:
-                                                BorderRadius.circular(10),
-                                            color: TideTheme.of(
-                                              context,
-                                            ).primary.withValues(alpha: 0.15),
-                                          ),
-                                          child: Text(
-                                            '测试',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color:
-                                                  TideTheme.of(context).primary,
-                                              fontFamily: 'TideFont',
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      BouncyTap(
-                                        onTap: () => _deleteProvider(i),
-                                        child: const Icon(
-                                          Icons.delete_outline_rounded,
-                                          size: 20,
-                                          color: Color(0xFFE74C3C),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    p['url'] ?? '',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: TideTheme.of(context).textWeak,
-                                      fontFamily: 'TideFont',
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  if ((p['model'] ?? '').toString().isNotEmpty)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 4),
-                                      child: Text(
-                                        '模型: ${p['model']}',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color:
-                                              TideTheme.of(context).textFaint,
-                                          fontFamily: 'TideFont',
-                                        ),
-                                      ),
-                                    ),
-                                  if ((p['key'] ?? '').toString().isNotEmpty)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 2),
-                                      child: Text(
-                                        'Key: ${(p['key'] as String).length < 8 ? p['key'] : (p['key'] as String).substring(0, 8)}...',
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          color:
-                                              TideTheme.of(context).textFaint,
-                                          fontFamily: 'TideFont',
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }),
-                      ],
-                      if (_sttProviders.isNotEmpty) ...[
-                        Padding(
-                          padding: const EdgeInsets.only(top: 16, bottom: 8),
-                          child: Text(
-                            '语音识别 (STT)',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              fontFamily: 'TideFont',
-                              color: TideTheme.of(context).textStrong,
-                            ),
-                          ),
-                        ),
-                        ...List.generate(_sttProviders.length, (i) {
-                          final p = _sttProviders[i];
-                          return BouncyTap(
-                            onTap: () => _editProvider(p, isStt: true),
-                            child: FrostCard(
-                              margin: const EdgeInsets.only(bottom: 10),
-                              padding: const EdgeInsets.all(14),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          p['name']?.toString() ?? '',
-                                          style: const TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w600,
-                                            fontFamily: 'TideFont',
-                                          ),
-                                        ),
-                                      ),
-                                      BouncyTap(
-                                        onTap: () => _testSttProvider(p),
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 10,
-                                            vertical: 4,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            borderRadius:
-                                                BorderRadius.circular(10),
-                                            color: TideTheme.of(
-                                              context,
-                                            ).primary.withValues(alpha: 0.15),
-                                          ),
-                                          child: Text(
-                                            '测试',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color:
-                                                  TideTheme.of(context).primary,
-                                              fontFamily: 'TideFont',
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      BouncyTap(
-                                        onTap: () =>
-                                            _deleteProvider(i, isStt: true),
-                                        child: const Icon(
-                                          Icons.delete_outline_rounded,
-                                          size: 20,
-                                          color: Color(0xFFE74C3C),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    p['url']?.toString() ?? '',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: TideTheme.of(context).textWeak,
-                                      fontFamily: 'TideFont',
-                                    ),
-                                  ),
-                                  if ((p['model'] ?? '').toString().isNotEmpty)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 4),
-                                      child: Text(
-                                        '模型: ${p['model']}',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color:
-                                              TideTheme.of(context).textFaint,
-                                          fontFamily: 'TideFont',
-                                        ),
-                                      ),
-                                    ),
-                                  if ((p['key'] ?? '').toString().isNotEmpty)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 2),
-                                      child: Text(
-                                        'Key: ${(p['key'] as String).length < 8 ? p['key'] : (p['key'] as String).substring(0, 8)}...',
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          color:
-                                              TideTheme.of(context).textFaint,
-                                          fontFamily: 'TideFont',
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }),
-                      ],
-                      if (_ttsProviders.isNotEmpty) ...[
-                        Padding(
-                          padding: const EdgeInsets.only(top: 16, bottom: 8),
-                          child: Text(
-                            'TTS 语音',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              fontFamily: 'TideFont',
-                              color: TideTheme.of(context).textStrong,
-                            ),
-                          ),
-                        ),
-                        ...List.generate(_ttsProviders.length, (i) {
-                          final p = _ttsProviders[i];
-                          return BouncyTap(
-                            onTap: () => _editProvider(p),
-                            child: FrostCard(
-                              margin: const EdgeInsets.only(bottom: 10),
-                              padding: const EdgeInsets.all(14),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          p['name'] ?? '',
-                                          style: const TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w600,
-                                            fontFamily: 'TideFont',
-                                          ),
-                                        ),
-                                      ),
-                                      BouncyTap(
-                                        onTap: () => _testTtsProvider(p),
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 10,
-                                            vertical: 4,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            borderRadius:
-                                                BorderRadius.circular(10),
-                                            color: TideTheme.of(
-                                              context,
-                                            ).primary.withValues(alpha: 0.15),
-                                          ),
-                                          child: Text(
-                                            '测试',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color:
-                                                  TideTheme.of(context).primary,
-                                              fontFamily: 'TideFont',
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      BouncyTap(
-                                        onTap: () =>
-                                            _deleteProvider(i, isTts: true),
-                                        child: const Icon(
-                                          Icons.delete_outline_rounded,
-                                          size: 20,
-                                          color: Color(0xFFE74C3C),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    p['url'] ?? '',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: TideTheme.of(context).textWeak,
-                                      fontFamily: 'TideFont',
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  if ((p['model'] ?? '').toString().isNotEmpty)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 4),
-                                      child: Text(
-                                        '模型: ${p['model']}',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color:
-                                              TideTheme.of(context).textFaint,
-                                          fontFamily: 'TideFont',
-                                        ),
-                                      ),
-                                    ),
-                                  if ((p['voice'] ?? '').toString().isNotEmpty)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 2),
-                                      child: Text(
-                                        '音色: ${p['voice']}',
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          color:
-                                              TideTheme.of(context).textFaint,
-                                          fontFamily: 'TideFont',
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }),
-                      ],
-                    ],
-                  ),
-                ),
+    child: Scaffold(
+      backgroundColor: Colors.transparent,
+      appBar: AppBar(
+        title: const Text(
+          'API 设置',
+          style: TextStyle(fontWeight: FontWeight.w600, fontFamily: 'TideFont'),
         ),
-      );
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_rounded, size: 20),
+          onPressed: () => Navigator.pop(context),
+        ),
+        actions: [
+          IconButton(
+            icon: Icon(
+              Icons.add_circle_outline_rounded,
+              color: TideTheme.of(context).primary,
+              size: 26,
+            ),
+            onPressed: _addProvider,
+          ),
+        ],
+      ),
+      body: _loading
+          ? Center(
+              child: CircularProgressIndicator(
+                color: TideTheme.of(context).primary,
+              ),
+            )
+          : SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (_providers.isEmpty &&
+                      _sttProviders.isEmpty &&
+                      _ttsProviders.isEmpty)
+                    Center(
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 80),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.api_rounded,
+                              size: 60,
+                              color: Color(0xFFC7C7CC),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              '还没有添加任何模型提供商',
+                              style: TextStyle(
+                                fontSize: 15,
+                                color: TideTheme.of(context).textWeak,
+                                fontFamily: 'TideFont',
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              '点击右上角 + 添加',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: TideTheme.of(context).textFaint,
+                                fontFamily: 'TideFont',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (_providers.isNotEmpty) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8, bottom: 8),
+                      child: Text(
+                        'AI 模型',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          fontFamily: 'TideFont',
+                          color: TideTheme.of(context).textStrong,
+                        ),
+                      ),
+                    ),
+                    ...List.generate(_providers.length, (i) {
+                      final p = _providers[i];
+                      return BouncyTap(
+                        onTap: () => _editProvider(p),
+                        child: FrostCard(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      p['name'] ?? '',
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                        fontFamily: 'TideFont',
+                                      ),
+                                    ),
+                                  ),
+                                  BouncyTap(
+                                    onTap: () => _testProvider(p),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(10),
+                                        color: TideTheme.of(
+                                          context,
+                                        ).primary.withValues(alpha: 0.15),
+                                      ),
+                                      child: Text(
+                                        '测试',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: TideTheme.of(context).primary,
+                                          fontFamily: 'TideFont',
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  BouncyTap(
+                                    onTap: () => _deleteProvider(i),
+                                    child: const Icon(
+                                      Icons.delete_outline_rounded,
+                                      size: 20,
+                                      color: Color(0xFFE74C3C),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                p['url'] ?? '',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: TideTheme.of(context).textWeak,
+                                  fontFamily: 'TideFont',
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              if ((p['model'] ?? '').toString().isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  child: Text(
+                                    '模型: ${p['model']}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: TideTheme.of(context).textFaint,
+                                      fontFamily: 'TideFont',
+                                    ),
+                                  ),
+                                ),
+                              if ((p['key'] ?? '').toString().isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 2),
+                                  child: Text(
+                                    'Key: ${(p['key'] as String).length < 8 ? p['key'] : (p['key'] as String).substring(0, 8)}...',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: TideTheme.of(context).textFaint,
+                                      fontFamily: 'TideFont',
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                  ],
+                  if (_sttProviders.isNotEmpty) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(top: 16, bottom: 8),
+                      child: Text(
+                        '语音识别 (STT)',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          fontFamily: 'TideFont',
+                          color: TideTheme.of(context).textStrong,
+                        ),
+                      ),
+                    ),
+                    ...List.generate(_sttProviders.length, (i) {
+                      final p = _sttProviders[i];
+                      return BouncyTap(
+                        onTap: () => _editProvider(p, isStt: true),
+                        child: FrostCard(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      p['name']?.toString() ?? '',
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                        fontFamily: 'TideFont',
+                                      ),
+                                    ),
+                                  ),
+                                  BouncyTap(
+                                    onTap: () => _testSttProvider(p),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(10),
+                                        color: TideTheme.of(
+                                          context,
+                                        ).primary.withValues(alpha: 0.15),
+                                      ),
+                                      child: Text(
+                                        '测试',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: TideTheme.of(context).primary,
+                                          fontFamily: 'TideFont',
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  BouncyTap(
+                                    onTap: () =>
+                                        _deleteProvider(i, isStt: true),
+                                    child: const Icon(
+                                      Icons.delete_outline_rounded,
+                                      size: 20,
+                                      color: Color(0xFFE74C3C),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                p['url']?.toString() ?? '',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: TideTheme.of(context).textWeak,
+                                  fontFamily: 'TideFont',
+                                ),
+                              ),
+                              if ((p['model'] ?? '').toString().isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  child: Text(
+                                    '模型: ${p['model']}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: TideTheme.of(context).textFaint,
+                                      fontFamily: 'TideFont',
+                                    ),
+                                  ),
+                                ),
+                              if ((p['key'] ?? '').toString().isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 2),
+                                  child: Text(
+                                    'Key: ${(p['key'] as String).length < 8 ? p['key'] : (p['key'] as String).substring(0, 8)}...',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: TideTheme.of(context).textFaint,
+                                      fontFamily: 'TideFont',
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                  ],
+                  if (_ttsProviders.isNotEmpty) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(top: 16, bottom: 8),
+                      child: Text(
+                        'TTS 语音',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          fontFamily: 'TideFont',
+                          color: TideTheme.of(context).textStrong,
+                        ),
+                      ),
+                    ),
+                    ...List.generate(_ttsProviders.length, (i) {
+                      final p = _ttsProviders[i];
+                      return BouncyTap(
+                        onTap: () => _editProvider(p),
+                        child: FrostCard(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      p['name'] ?? '',
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                        fontFamily: 'TideFont',
+                                      ),
+                                    ),
+                                  ),
+                                  BouncyTap(
+                                    onTap: () => _testTtsProvider(p),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(10),
+                                        color: TideTheme.of(
+                                          context,
+                                        ).primary.withValues(alpha: 0.15),
+                                      ),
+                                      child: Text(
+                                        '测试',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: TideTheme.of(context).primary,
+                                          fontFamily: 'TideFont',
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  BouncyTap(
+                                    onTap: () =>
+                                        _deleteProvider(i, isTts: true),
+                                    child: const Icon(
+                                      Icons.delete_outline_rounded,
+                                      size: 20,
+                                      color: Color(0xFFE74C3C),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                p['url'] ?? '',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: TideTheme.of(context).textWeak,
+                                  fontFamily: 'TideFont',
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              if ((p['model'] ?? '').toString().isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  child: Text(
+                                    '模型: ${p['model']}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: TideTheme.of(context).textFaint,
+                                      fontFamily: 'TideFont',
+                                    ),
+                                  ),
+                                ),
+                              if ((p['voice'] ?? '').toString().isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 2),
+                                  child: Text(
+                                    '音色: ${p['voice']}',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: TideTheme.of(context).textFaint,
+                                      fontFamily: 'TideFont',
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                  ],
+                ],
+              ),
+            ),
+    ),
+  );
 }

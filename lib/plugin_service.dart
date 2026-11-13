@@ -1,28 +1,37 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
-import 'package:path/path.dart' as p;
 
 import 'app_log_service.dart';
 import 'plugin_contract.dart';
+import 'plugin_chat_session.dart';
+import 'plugin_chat_host.dart';
 import 'plugin_coordinator.dart';
 import 'plugin_runtime.dart';
 import 'plugin_system.dart';
+import 'plugin_package_files.dart';
 
 class PluginService {
   PluginService._() {
     PluginCoordinator.listen(_invalidateLocal);
   }
   final _epochs = <String, int>{};
+  final _chatSessions = <String, PluginChatSession>{};
+  void _cancelChats(String id) {
+    for (final session in _chatSessions.values.toList()) {
+      if (session.pluginId == id) session.cancel();
+    }
+  }
+
   void _invalidateLocal(String id, int epoch) {
     if ((_epochs[id] ?? -1) >= epoch) return;
     _epochs[id] = epoch;
     _stopping.add(id);
+    _cancelChats(id);
     final runtime = _running.remove(id);
     runtime?.close();
     _packages.remove(id);
@@ -126,6 +135,7 @@ class PluginService {
       onClosed: () {
         if (!identical(_running[pack.id], runtime)) return;
         _stopping.add(pack.id);
+        _cancelChats(pack.id);
         _running.remove(pack.id);
         _packages.remove(pack.id);
         _configSnapshots.remove(pack.id);
@@ -139,9 +149,11 @@ class PluginService {
     _packages[pack.id] = pack;
     try {
       final sdk = await rootBundle.loadString('assets/plugin_sdk.js');
-      final source = await File(
-        p.join(pack.directory.path, pack.entry),
-      ).readAsString();
+      final source = await PluginPackageFiles(pack.directory).program(
+        pack.entry,
+        format: pack.manifest['entryFormat'] as String? ?? 'script',
+        modules: pack.manifest['modules'] as List? ?? [],
+      );
       await runtime.start(sdk, source, values);
       await runtime.call(
         'validate',
@@ -176,6 +188,7 @@ class PluginService {
 
   Future<void> _stop(String id) async {
     _stopping.add(id);
+    _cancelChats(id);
     final runtime = _running.remove(id);
     // Cancel network work before invoking teardown; a plugin may be awaiting it.
     for (final client in _clients.remove(id) ?? <http.Client>{}) {
@@ -296,24 +309,34 @@ class PluginService {
 
   Future<Map<String, dynamic>> execute(
     String name,
-    Map<String, dynamic> args,
-  ) async {
+    Map<String, dynamic> args, {
+    String? botId,
+  }) async {
     await initialize();
     for (final pack in _packages.values.toList()) {
       for (final tool in pack.manifest['tools'] as List? ?? []) {
         if (toolName(pack.id, tool['name'] as String) != name) continue;
         final runtime = _running[pack.id];
         if (runtime == null || runtime.closed) break;
+        final session = botId == null
+            ? null
+            : PluginChatSession(
+                host: const AppPluginChatHost(),
+                pluginId: pack.id,
+                botId: botId,
+                assertCurrent: () => _assertCurrent(pack),
+              );
+        if (session != null) _chatSessions[session.token] = session;
         try {
           final checked = PluginContract.values(
             tool['parameters'] as Map,
             args,
           );
-          final value = await runtime.call(
-            'tool',
-            tool['name'] as String,
-            checked,
-          );
+          final value = await runtime.call('tool', tool['name'] as String, {
+            '__tideInvocation': true,
+            'args': checked,
+            'contextToken': session?.token,
+          });
           await _assertCurrent(pack);
           return {
             'result': {'ok': true, 'data': value},
@@ -322,6 +345,15 @@ class PluginService {
           return {
             'result': {'ok': false, 'error': error.toString()},
           };
+        } finally {
+          if (session != null) {
+            _chatSessions.remove(session.token);
+            try {
+              await session.close();
+            } catch (error) {
+              _log(pack.id, '媒体清理失败：$error');
+            }
+          }
         }
       }
     }
@@ -391,6 +423,26 @@ class PluginService {
       throw StateError('插件已停止');
     await _assertCurrent(pack);
     final permissions = pack.manifest['permissions'] as List? ?? [];
+    if (method.startsWith('chat.') || method.startsWith('media.')) {
+      final session = _chatSessions[args['contextToken']];
+      if (session == null || session.pluginId != pack.id)
+        throw StateError('此 API 需要有效的工具调用上下文');
+      return session.call(
+        method,
+        args,
+        permissions,
+        pack.manifest['networkOrigins'] as List? ?? [],
+      );
+    }
+    if (method == 'resources.readText' || method == 'resources.readJson') {
+      final path = args['path'];
+      final resources = pack.manifest['resources'] as List? ?? [];
+      if (path is! String || !resources.contains(path))
+        throw StateError('资源未在 resources 中声明');
+      final text = await PluginPackageFiles(pack.directory).text(path);
+      await _assertCurrent(pack);
+      return method == 'resources.readJson' ? jsonDecode(text) : text;
+    }
     if (method == 'log') {
       _log(
         pack.id,

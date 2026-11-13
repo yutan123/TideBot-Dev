@@ -1,3 +1,4 @@
+import 'user_profile_changes.dart';
 import 'android_selection_menu.dart';
 import 'life_schedule_service.dart';
 import 'bot_image_tool.dart';
@@ -173,10 +174,16 @@ class _SpacePageState extends State<SpacePage> {
       if (_diaryVisibleStart >= _memories.length) _diaryVisibleStart = 0;
       if (_diaryScrollIndex >= _memories.length) _diaryScrollIndex = 0;
       final quoteBotId = _botId;
-      unawaited(DailyQuoteService.instance.get(quoteBotId).then((quote) {
-        if (!mounted || quoteBotId != _botId || quote.trim().isEmpty) return;
-        setState(() => _dailyQuote = quote);
-      }).catchError((_) {}));
+      unawaited(
+        DailyQuoteService.instance
+            .get(quoteBotId)
+            .then((quote) {
+              if (!mounted || quoteBotId != _botId || quote.trim().isEmpty)
+                return;
+              setState(() => _dailyQuote = quote);
+            })
+            .catchError((_) {}),
+      );
       if (mounted) {
         setState(() {
           _loading = false;
@@ -246,10 +253,11 @@ class _SpacePageState extends State<SpacePage> {
   // 记忆窗口：从短期→长期合并列表中，取 _diaryVisibleStart 开始的 3 条（循环取模），
   // 配合 AnimatedSwitcher 做淡入滚动观感。显示不足 3 条时按实际数量铺开。
   Widget _buildDiaryWindow(TideTheme theme) => WorldBookPreviewWindow(
-      memories: _memories,
-      startIndex: _diaryVisibleStart,
-      onSelect: _showMemoryDetail,
-      formatTimestamp: formatTime);
+    memories: _memories,
+    startIndex: _diaryVisibleStart,
+    onSelect: _showMemoryDetail,
+    formatTimestamp: formatTime,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -274,16 +282,23 @@ class _SpacePageState extends State<SpacePage> {
                     if (_botId.isNotEmpty) ...[
                       _buildQuoteCard(theme),
                       const SizedBox(height: 16),
-                      Row(children: [
-                        Expanded(
+                      Row(
+                        children: [
+                          Expanded(
                             child: AspectRatio(
-                                aspectRatio: 1, child: _buildDaysCard(theme))),
-                        const SizedBox(width: 16),
-                        Expanded(
+                              aspectRatio: 1,
+                              child: _buildDaysCard(theme),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
                             child: AspectRatio(
-                                aspectRatio: 1,
-                                child: _buildVitalCarousel(theme))),
-                      ]),
+                              aspectRatio: 1,
+                              child: _buildVitalCarousel(theme),
+                            ),
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 16),
                       Row(
                         children: [
@@ -363,229 +378,232 @@ class _SpacePageState extends State<SpacePage> {
   }
 
   Widget _buildHeader(String time, String date, TideTheme theme) => Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    children: [
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                time,
-                style: TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.w300,
-                  fontFamily: 'TideFont',
-                  color: theme.textStrong,
-                ),
-              ),
-              Text(
-                date,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: theme.textWeak,
-                  fontFamily: 'TideFont',
-                ),
-              ),
-            ],
-          ),
-          if (_botId.isNotEmpty)
-            BouncyTap(
-              onTap: () async {
-                final db = DBManager();
-                final bots = await db.queryBots();
-                if (!mounted) return;
-                showTideSheet(
-                  context: context,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const SizedBox(height: 12),
-                      const Text(
-                        '切换机器人',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          fontFamily: 'TideFont',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      ...bots.map(
-                        (b) => Column(
-                          children: [
-                            ListTile(
-                              title: Text(
-                                b['name'] ?? '',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontFamily: 'TideFont'),
-                              ),
-                              trailing: _botId == b['id']
-                                  ? Icon(
-                                      Icons.check_rounded,
-                                      color: TideTheme.of(context).primary,
-                                    )
-                                  : null,
-                              onTap: () async {
-                                final selectedId = b['id'] as String? ?? '';
-                                await db.setKV(
-                                    'space_selected_bot_id', selectedId);
-                                if (!mounted) return;
-                                setState(() {
-                                  _botId = selectedId;
-                                  _botName = b['name'] as String? ?? '';
-                                });
-                                Navigator.pop(context);
-                                _loadData();
-                              },
-                            ),
-                            const Divider(height: 1),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                  color: theme.surface.withValues(
-                    alpha: theme.isDark ? 0.82 : 0.80,
-                  ),
-                  border: Border.all(color: theme.border),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _botName,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        fontFamily: 'TideFont',
-                        color: theme.primary,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Icon(
-                      Icons.keyboard_arrow_down_rounded,
-                      size: 18,
-                      color: theme.primary,
-                    ),
-                  ],
-                ),
-              ),
+          Text(
+            time,
+            style: TextStyle(
+              fontSize: 32,
+              fontWeight: FontWeight.w300,
+              fontFamily: 'TideFont',
+              color: theme.textStrong,
             ),
+          ),
+          Text(
+            date,
+            style: TextStyle(
+              fontSize: 14,
+              color: theme.textWeak,
+              fontFamily: 'TideFont',
+            ),
+          ),
         ],
-      );
-
-  Widget _buildQuoteCard(TideTheme theme) => FrostCard(
-        liquid: true,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+      ),
+      if (_botId.isNotEmpty)
+        BouncyTap(
+          onTap: () async {
+            final db = DBManager();
+            final bots = await db.queryBots();
+            if (!mounted) return;
+            showTideSheet(
+              context: context,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 12),
+                  const Text(
+                    '切换机器人',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      fontFamily: 'TideFont',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  ...bots.map(
+                    (b) => Column(
+                      children: [
+                        ListTile(
+                          title: Text(
+                            b['name'] ?? '',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontFamily: 'TideFont'),
+                          ),
+                          trailing: _botId == b['id']
+                              ? Icon(
+                                  Icons.check_rounded,
+                                  color: TideTheme.of(context).primary,
+                                )
+                              : null,
+                          onTap: () async {
+                            final selectedId = b['id'] as String? ?? '';
+                            await db.setKV('space_selected_bot_id', selectedId);
+                            if (!mounted) return;
+                            setState(() {
+                              _botId = selectedId;
+                              _botName = b['name'] as String? ?? '';
+                            });
+                            Navigator.pop(context);
+                            _loadData();
+                          },
+                        ),
+                        const Divider(height: 1),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              color: theme.surface.withValues(
+                alpha: theme.isDark ? 0.82 : 0.80,
+              ),
+              border: Border.all(color: theme.border),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.format_quote_rounded,
-                    color: theme.primary, size: 20),
-                const SizedBox(width: 8),
                 Text(
-                  '今日一言',
+                  _botName,
                   style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
                     fontFamily: 'TideFont',
                     color: theme.primary,
                   ),
+                ),
+                const SizedBox(width: 4),
+                Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  size: 18,
+                  color: theme.primary,
                 ),
               ],
             ),
-            const SizedBox(height: 10),
+          ),
+        ),
+    ],
+  );
+
+  Widget _buildQuoteCard(TideTheme theme) => FrostCard(
+    liquid: true,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.format_quote_rounded, color: theme.primary, size: 20),
+            const SizedBox(width: 8),
             Text(
-              _dailyQuote.isNotEmpty ? _dailyQuote : '点击刷新今日一言',
+              '今日一言',
               style: TextStyle(
-                fontSize: 16,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
                 fontFamily: 'TideFont',
-                color:
-                    _dailyQuote.isNotEmpty ? theme.textStrong : theme.textFaint,
-                height: 1.5,
+                color: theme.primary,
               ),
             ),
           ],
         ),
-      );
+        const SizedBox(height: 10),
+        Text(
+          _dailyQuote.isNotEmpty ? _dailyQuote : '点击刷新今日一言',
+          style: TextStyle(
+            fontSize: 16,
+            fontFamily: 'TideFont',
+            color: _dailyQuote.isNotEmpty ? theme.textStrong : theme.textFaint,
+            height: 1.5,
+          ),
+        ),
+      ],
+    ),
+  );
 
   Widget _buildDaysCard(TideTheme theme) => FrostCard(
-        liquid: true,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  '$_daysSince',
-                  style: TextStyle(
-                    fontSize: 56,
-                    fontWeight: FontWeight.w200,
-                    fontFamily: 'TideFont',
-                    color: theme.primary,
-                    height: 1.0,
-                  ),
-                )),
-            const SizedBox(height: 8),
-            Text(
-              '相遇天数',
-              style: TextStyle(
-                fontSize: 14,
-                color: theme.textWeak,
-                fontFamily: 'TideFont',
-                letterSpacing: 2,
-              ),
+    liquid: true,
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            '$_daysSince',
+            style: TextStyle(
+              fontSize: 56,
+              fontWeight: FontWeight.w200,
+              fontFamily: 'TideFont',
+              color: theme.primary,
+              height: 1.0,
             ),
-          ],
+          ),
         ),
-      );
+        const SizedBox(height: 8),
+        Text(
+          '相遇天数',
+          style: TextStyle(
+            fontSize: 14,
+            color: theme.textWeak,
+            fontFamily: 'TideFont',
+            letterSpacing: 2,
+          ),
+        ),
+      ],
+    ),
+  );
 
   Widget _buildVitalCarousel(TideTheme theme) {
     return AnimatedSwitcher(
-        duration: const Duration(milliseconds: 450),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
-        transitionBuilder: (child, animation) => FadeTransition(
-            opacity: animation,
-            child: SlideTransition(
-                position:
-                    Tween<Offset>(begin: const Offset(.2, 0), end: Offset.zero)
-                        .animate(animation),
-                child: child)),
-        child: VitalMetricCard(
-            key: ValueKey('$_botId:$_vitalCardIndex'),
-            data: _vitalSigns ?? {},
-            index: _vitalCardIndex,
-            onTap: () async {
-              await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      allowSnapshotting: false,
-                      builder: (_) =>
-                          BotDataPage(botId: _botId, botName: _botName)));
-              if (mounted) await _refreshVitals();
-            }));
+      duration: const Duration(milliseconds: 450),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      transitionBuilder: (child, animation) => FadeTransition(
+        opacity: animation,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(.2, 0),
+            end: Offset.zero,
+          ).animate(animation),
+          child: child,
+        ),
+      ),
+      child: VitalMetricCard(
+        key: ValueKey('$_botId:$_vitalCardIndex'),
+        data: _vitalSigns ?? {},
+        index: _vitalCardIndex,
+        onTap: () async {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              allowSnapshotting: false,
+              builder: (_) => BotDataPage(botId: _botId, botName: _botName),
+            ),
+          );
+          if (mounted) await _refreshVitals();
+        },
+      ),
+    );
   }
 
   Widget _buildSectionTitle(String title) => Padding(
-        padding: const EdgeInsets.only(left: 4),
-        child: Text(
-          title,
-          style: TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w600,
-            fontFamily: 'TideFont',
-            color: TideTheme.of(context).textStrong,
-          ),
-        ),
-      );
+    padding: const EdgeInsets.only(left: 4),
+    child: Text(
+      title,
+      style: TextStyle(
+        fontSize: 17,
+        fontWeight: FontWeight.w600,
+        fontFamily: 'TideFont',
+        color: TideTheme.of(context).textStrong,
+      ),
+    ),
+  );
 
   // 日程仅作为机器人内部生活状态，不在空间页直接展示。
 }
@@ -674,9 +692,9 @@ class SquarePageState extends State<SquarePage>
     final dayKey = '${day.year}-${day.month}-${day.day}';
     final perDay =
         (int.tryParse(await db.getKV('bot_posts_per_day') ?? '') ?? 1).clamp(
-      1,
-      10,
-    );
+          1,
+          10,
+        );
     final bots = await db.queryBots();
     for (final bot in bots) {
       final botId = bot['id']?.toString() ?? '';
@@ -711,7 +729,8 @@ class SquarePageState extends State<SquarePage>
                 .clamp(1, 100);
         // The setting is the sole source of probability. The model plans a
         // scene only after the application selects this post for an image.
-        final wantsImage = withImages &&
+        final wantsImage =
+            withImages &&
             Random('$dayKey:$botId:$index:image'.hashCode).nextInt(100) <
                 imageChance;
         final hasPortraitReference =
@@ -724,21 +743,12 @@ class SquarePageState extends State<SquarePage>
         final res = await AIManager().sendMessage(
           task: AIRequestTask.feedPost,
           botId: botId,
-          // ignore: prefer_interpolation_to_compose_strings
-          text: (wantsImage
+          text:
+              // ignore: prefer_interpolation_to_compose_strings
+              (wantsImage
                   ? '请以第一人称创作今天第 ${index + 1} 条朋友圈生活动态。仅输出严格 JSON，不要 markdown：{"content":"20到60字的自然生活动态","image_prompt":"与正文一致的完整生图提示词","use_portrait_reference":false}。$referenceRule 正文要具体、口语化，不写标签，不提图片。image_prompt 必须包含当前场景、时间、动作、可见穿搭或环境；未配置明确外观时优先第一人称生活场景、物件、环境或局部画面。不要出现机器人、机械人、AI 助手、文字、水印、UI 或聊天截图。'
                   : '请以第一人称发一条像朋友圈一样的生活动态（20到60字）：写今天真实、具体的小事、行动、瞬间感受或想分享给朋友的话。这是今天第 ${index + 1} 条，请避免重复已有内容。不要写成文章、日记、总结、散文或说教；自然口语化、有生活感，不要使用心情标签、话题标签，也不要提到图片、照片、配图或任何媒体占位。') +
-              '\n当前本地时间：${DateTime.now().toIso8601String()}。\n当天生活素材（计划不等于已发生）：${await LifeScheduleService.instance.ensureToday(botId)}\n当天已发动态：${(await (await db.database).query('posts', where: 'author_id = ? AND timestamp >= ?', whereArgs: [
-                    botId,
-                    DateTime.now()
-                        .copyWith(
-                            hour: 0,
-                            minute: 0,
-                            second: 0,
-                            millisecond: 0,
-                            microsecond: 0)
-                        .millisecondsSinceEpoch
-                  ])).map((p) => p['content']).join('；')}',
+              '\n当前本地时间：${DateTime.now().toIso8601String()}。\n当天生活素材（计划不等于已发生）：${await LifeScheduleService.instance.ensureToday(botId)}\n当天已发动态：${(await (await db.database).query('posts', where: 'author_id = ? AND timestamp >= ?', whereArgs: [botId, DateTime.now().copyWith(hour: 0, minute: 0, second: 0, millisecond: 0, microsecond: 0).millisecondsSinceEpoch])).map((p) => p['content']).join('；')}',
           persistResponse: false,
           allowTools: false,
         );
@@ -781,7 +791,8 @@ class SquarePageState extends State<SquarePage>
         if (wantsImage &&
             imagePrompt.isNotEmpty &&
             imagePrompt.length <= 2000) {
-          imagePath = await AIManager().generateImageForBot(
+          imagePath =
+              await AIManager().generateImageForBot(
                 botId: botId,
                 prompt: hasPortraitReference && !usePortraitReference
                     ? '$imagePrompt。画面不包含人物、人像、手部或身体局部，不添加人物元素。'
@@ -913,8 +924,9 @@ class SquarePageState extends State<SquarePage>
       final comments = postId.isEmpty ? 0 : await db.countPostComments(postId);
       final author = r['author_id']?.toString().trim() ?? '匿名';
       final bot = botByAuthor(author);
-      final displayAuthor =
-          bot.isNotEmpty ? bot['name']?.toString() ?? author : author;
+      final displayAuthor = bot.isNotEmpty
+          ? bot['name']?.toString() ?? author
+          : author;
       feeds.add({
         'user': displayAuthor == '我' ? '我' : displayAuthor,
         'author_id': author,
@@ -1360,7 +1372,8 @@ class SquarePageState extends State<SquarePage>
                           final wasLiked = f['favorited'] as bool;
                           setState(() {
                             f['favorited'] = !wasLiked;
-                            f['likes'] = (f['likes'] as int) +
+                            f['likes'] =
+                                (f['likes'] as int) +
                                 (f['favorited'] == true ? 1 : -1);
                           });
                           // 用户的点赞是真实互动事件，落库 feed_events。
@@ -1530,56 +1543,56 @@ class SquarePageState extends State<SquarePage>
   }
 
   Widget _buildGames(TideTheme theme) => GridView.builder(
-        key: const ValueKey('games'),
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
-        physics: const BouncingScrollPhysics(),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          crossAxisSpacing: 14,
-          mainAxisSpacing: 14,
-          // 仅四款游戏，使用更高的入口卡片以提升可点性与可读性。
-          childAspectRatio: 0.78,
-        ),
-        itemCount: _games.length,
-        itemBuilder: (ctx, i) {
-          final g = _games[i];
-          final icon = _gameIcons[g['icon']] ?? Icons.extension_rounded;
-          return BouncyTap(
-            onTap: () => _startGame(g['name']?.toString() ?? ''),
-            child: FrostCard(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(icon, size: 52, color: theme.primary),
-                  const SizedBox(height: 14),
-                  Text(
-                    g['name'] ?? '',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      fontFamily: 'TideFont',
-                      color: theme.textStrong,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    g['desc'] ?? '',
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Color(0xFFC7C7CC),
-                      fontFamily: 'TideFont',
-                    ),
-                  ),
-                ],
+    key: const ValueKey('games'),
+    padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
+    physics: const BouncingScrollPhysics(),
+    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+      crossAxisCount: 2,
+      crossAxisSpacing: 14,
+      mainAxisSpacing: 14,
+      // 仅四款游戏，使用更高的入口卡片以提升可点性与可读性。
+      childAspectRatio: 0.78,
+    ),
+    itemCount: _games.length,
+    itemBuilder: (ctx, i) {
+      final g = _games[i];
+      final icon = _gameIcons[g['icon']] ?? Icons.extension_rounded;
+      return BouncyTap(
+        onTap: () => _startGame(g['name']?.toString() ?? ''),
+        child: FrostCard(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 52, color: theme.primary),
+              const SizedBox(height: 14),
+              Text(
+                g['name'] ?? '',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  fontFamily: 'TideFont',
+                  color: theme.textStrong,
+                ),
               ),
-            ),
-          );
-        },
+              const SizedBox(height: 4),
+              Text(
+                g['desc'] ?? '',
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: Color(0xFFC7C7CC),
+                  fontFamily: 'TideFont',
+                ),
+              ),
+            ],
+          ),
+        ),
       );
+    },
+  );
 }
 
 // ==================== 全屏发布页 ====================
@@ -1682,8 +1695,10 @@ class _PublishFeedPageState extends State<_PublishFeedPage> {
             ),
             if (_imagePath != null)
               Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 8,
+                ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
                   child: Stack(
@@ -1771,8 +1786,9 @@ Future<Map<String, dynamic>?> feedMapFromPostId(String postId) async {
       break;
     }
   }
-  final displayAuthor =
-      bot.isNotEmpty ? bot['name']?.toString() ?? author : author;
+  final displayAuthor = bot.isNotEmpty
+      ? bot['name']?.toString() ?? author
+      : author;
   return {
     'user': displayAuthor == '我' ? '我' : displayAuthor,
     'author_id': author,
@@ -1806,10 +1822,8 @@ void openFeedDetail(
   Navigator.push(
     context,
     PageRouteBuilder(
-      pageBuilder: (c, a, s) => _FeedDetailPage(
-        feed: feed,
-        onUpdate: onUpdate ?? () {},
-      ),
+      pageBuilder: (c, a, s) =>
+          _FeedDetailPage(feed: feed, onUpdate: onUpdate ?? () {}),
       transitionsBuilder: (c, a, s, child) => SlideTransition(
         position: Tween<Offset>(
           begin: const Offset(0, 0.15),
@@ -1834,6 +1848,8 @@ class _FeedDetailPage extends StatefulWidget {
 class _FeedDetailPageState extends State<_FeedDetailPage> {
   final _commentCtrl = TextEditingController();
   List<Map<String, dynamic>> _comments = [];
+  String _userName = '我';
+  String? _userAvatar;
   bool _loading = true;
   bool _sendingComment = false;
   Map<String, dynamic>? _replyTarget;
@@ -1842,16 +1858,32 @@ class _FeedDetailPageState extends State<_FeedDetailPage> {
   void initState() {
     super.initState();
     _loadComments();
+    UserProfileChanges.revision.addListener(_reloadUserProfile);
   }
 
   @override
   void dispose() {
+    UserProfileChanges.revision.removeListener(_reloadUserProfile);
     _commentCtrl.dispose();
     super.dispose();
   }
 
+  Future<void> _reloadUserProfile() async {
+    final revision = UserProfileChanges.revision.value;
+    final db = DBManager();
+    final name = await db.getKV('user_name');
+    final avatar = await db.getKV('user_avatar');
+    if (!mounted || revision != UserProfileChanges.revision.value) return;
+    setState(() {
+      _userName = name?.trim().isNotEmpty == true ? name! : '我';
+      _userAvatar = avatar;
+    });
+  }
+
   Future<void> _loadComments() async {
     final db = DBManager();
+    final userName = await db.getKV('user_name');
+    final userAvatar = await db.getKV('user_avatar');
     // 关联机器人名字到头像，供评论真实头像展示。
     final bots = await db.queryBots();
     final avatarMap = <String, String>{};
@@ -1862,7 +1894,9 @@ class _FeedDetailPageState extends State<_FeedDetailPage> {
     final rows = await db.queryPostComments(widget.feed['id'] as String? ?? '');
     if (mounted) {
       setState(() {
-        // 为每条评论补充头像（机器人评论才有真实头像，'me' 无）。
+        _userName = userName?.trim().isNotEmpty == true ? userName! : '我';
+        _userAvatar = userAvatar;
+        // 用户评论在显示时读取当前资料，作者标识保持为 me。
         _comments = rows.map((c) {
           final author = c['author_id']?.toString() ?? '';
           final avatar = avatarMap[author];
@@ -1882,7 +1916,8 @@ class _FeedDetailPageState extends State<_FeedDetailPage> {
     // 先乐观更新 UI，再写入真实互动事件。
     setState(() {
       widget.feed['favorited'] = !wasLiked;
-      widget.feed['likes'] = (widget.feed['likes'] as int) +
+      widget.feed['likes'] =
+          (widget.feed['likes'] as int) +
           (widget.feed['favorited'] == true ? 1 : -1);
     });
     // 用户的点赞是真实发生的互动事件：写 feed_events（actor 固定为 'me'）。
@@ -1953,8 +1988,8 @@ class _FeedDetailPageState extends State<_FeedDetailPage> {
       if (mounted) {
         setState(() {
           _comments.remove(comment);
-          widget.feed['comments'] =
-              ((widget.feed['comments'] as int) - 1).clamp(0, 1 << 30);
+          widget.feed['comments'] = ((widget.feed['comments'] as int) - 1)
+              .clamp(0, 1 << 30);
           _sendingComment = false;
         });
         GlobalNotice.show('评论发送失败，请重试', color: const Color(0xFFE74C3C));
@@ -2111,29 +2146,34 @@ class _FeedDetailPageState extends State<_FeedDetailPage> {
       (byParent[key] ??= []).add(comment);
     }
     List<Widget> buildNodes(String parentId, int depth) => [
-          for (final comment
-              in byParent[parentId] ?? const <Map<String, dynamic>>[]) ...[
-            _commentNode(comment, depth),
-            ...buildNodes(comment['id']?.toString() ?? '', depth + 1),
-          ],
-        ];
+      for (final comment
+          in byParent[parentId] ?? const <Map<String, dynamic>>[]) ...[
+        _commentNode(comment, depth),
+        ...buildNodes(comment['id']?.toString() ?? '', depth + 1),
+      ],
+    ];
     return buildNodes('', 0);
   }
+
+  String _commentAuthorName(Map<String, dynamic> comment) =>
+      comment['author_id'] == 'me'
+      ? _userName
+      : comment['author_id']?.toString() ?? '匿名';
 
   Widget _commentNode(Map<String, dynamic> comment, int depth) {
     final theme = TideTheme.of(context);
     final inset = (depth * 18.0).clamp(0, 72).toDouble();
+    final authorName = _commentAuthorName(comment);
+    final avatar = comment['author_id'] == 'me'
+        ? _userAvatar
+        : comment['author_avatar']?.toString();
     return Padding(
       padding: EdgeInsets.only(left: inset, bottom: 14),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          (comment['author_avatar'] as String?)?.isNotEmpty == true
-              ? TideBotAvatar(
-                  name: comment['author_id']?.toString() ?? 'TA',
-                  path: comment['author_avatar']?.toString(),
-                  size: 30,
-                )
+          avatar?.isNotEmpty == true
+              ? TideBotAvatar(name: authorName, path: avatar, size: 30)
               : CircleAvatar(
                   radius: 15,
                   backgroundColor: theme.primary.withValues(alpha: .12),
@@ -2158,7 +2198,7 @@ class _FeedDetailPageState extends State<_FeedDetailPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    comment['author_id'] ?? '匿名',
+                    authorName,
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
@@ -2398,7 +2438,7 @@ class _FeedDetailPageState extends State<_FeedDetailPage> {
                         children: [
                           Expanded(
                             child: Text(
-                              '回复 ${_replyTarget!['author_id'] ?? '评论'}',
+                              '回复 ${_commentAuthorName(_replyTarget!)}',
                               textAlign: TextAlign.start,
                               style: TextStyle(
                                 color: theme.textWeak,
@@ -2420,8 +2460,9 @@ class _FeedDetailPageState extends State<_FeedDetailPage> {
                             contextMenuBuilder: androidTextContextMenu,
                             controller: _commentCtrl,
                             textInputAction: TextInputAction.send,
-                            onSubmitted:
-                                _sendingComment ? null : (_) => _sendComment(),
+                            onSubmitted: _sendingComment
+                                ? null
+                                : (_) => _sendComment(),
                             style: TextStyle(
                               color: theme.textStrong,
                               fontFamily: 'TideFont',

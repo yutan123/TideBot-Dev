@@ -1,4 +1,4 @@
-// TideBot SDK v1. Bundled host infrastructure, not a business plugin.
+// TideBot JavaScript SDK, API version 1.
 (() => {
   'use strict';
   const tools = new Map(), events = new Map(), pending = new Map();
@@ -21,8 +21,41 @@
     pending.delete(id);
     error ? callback.reject(new Error(error)) : callback.resolve(value);
   };
+  const scoped = token => {
+    const call = (method, options = {}) => {
+      if (!token) return Promise.reject(new Error('This API requires a tool invocation context'));
+      return rpc(method, {...options, contextToken: token});
+    };
+    return Object.freeze({
+      chat: Object.freeze({
+        getContext: () => call('chat.context'),
+        sendText: options => call('chat.sendText', options),
+        sendImage: options => call('chat.sendImage', options),
+        sendVideo: options => call('chat.sendVideo', options),
+        sendAudio: options => call('chat.sendAudio', options),
+        getStatus: requestId => call('chat.status', {requestId}),
+      }),
+      media: Object.freeze({
+        download: options => call('media.download', options),
+        release: resourceId => call('media.release', {resourceId}),
+      }),
+    });
+  };
   globalThis.tide = Object.freeze({
     apiVersion: 1,
+    capabilities: Object.freeze(['chat.send', 'media.download', 'invocation.context', 'modules.commonjs', 'resources.read', 'ui.web']),
+    chat: Object.freeze({
+      getContext: context => context.chat.getContext(),
+      sendText: (context, options) => context.chat.sendText(options),
+      sendImage: (context, options) => context.chat.sendImage(options),
+      sendVideo: (context, options) => context.chat.sendVideo(options),
+      sendAudio: (context, options) => context.chat.sendAudio(options),
+      getStatus: (context, requestId) => context.chat.getStatus(requestId),
+    }),
+    media: Object.freeze({
+      download: (context, options) => context.media.download(options),
+      release: (context, resourceId) => context.media.release(resourceId),
+    }),
     config: Object.freeze(globalThis.__tideConfig || {}),
     registerTool(name, handler) {
       if (typeof handler !== 'function' || tools.has(name)) throw new Error('Invalid/duplicate tool: ' + name);
@@ -49,6 +82,7 @@
         throw new Error('Storage update contention exceeded retry limit');
       },
     }),
+    resources: Object.freeze({readText: path => rpc('resources.readText', {path}), readJson: path => rpc('resources.readJson', {path})}),
     request: options => rpc('http.request', options),
     log: message => rpc('log', {message: String(message)}),
   });
@@ -62,7 +96,8 @@
       if (kind === 'tool') {
         const handler = tools.get(name);
         if (!handler) throw new Error('Tool not registered: ' + name);
-        return await handler(payload);
+        const wrapped = payload && payload.__tideInvocation === true;
+        return await handler(wrapped ? payload.args : payload, scoped(wrapped ? payload.contextToken : null));
       }
       let result = payload;
       for (const handler of events.get(name) || []) {

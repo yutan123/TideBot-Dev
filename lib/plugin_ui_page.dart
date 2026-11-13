@@ -7,9 +7,10 @@ import 'package:path/path.dart' as p;
 import 'plugin_contract.dart';
 import 'plugin_service.dart';
 import 'plugin_system.dart';
+import 'plugin_web_page.dart';
 import 'theme.dart';
 
-/// Plugin interfaces use host Flutter widgets, with no second browser engine.
+/// Routes package UI to the declared renderer.
 class PluginUiPage extends StatefulWidget {
   final TidePluginPackage package;
   const PluginUiPage({super.key, required this.package});
@@ -186,31 +187,36 @@ class _PluginUiPageState extends State<PluginUiPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: TideTheme.of(context).pageBackground,
-    appBar: AppBar(title: Text(widget.package.name)),
-    body: SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (_busy) const LinearProgressIndicator(),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Text(
-                _error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
+  Widget build(BuildContext context) =>
+      widget.package.manifest['ui']['type'] == 'web'
+      ? PluginWebPage(package: widget.package)
+      : Scaffold(
+          backgroundColor: TideTheme.of(context).pageBackground,
+          appBar: AppBar(title: Text(widget.package.name)),
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (_busy) const LinearProgressIndicator(),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(
+                      _error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ),
+                if (_layout != null)
+                  _node(_layout!)
+                else if (_error == null)
+                  const Center(child: CircularProgressIndicator())
+                else
+                  TextButton(onPressed: _load, child: const Text('重试')),
+              ],
             ),
-          if (_layout != null)
-            _node(_layout!)
-          else if (_error == null)
-            const Center(child: CircularProgressIndicator())
-          else
-            TextButton(onPressed: _load, child: const Text('重试')),
-        ],
-      ),
-    ),
-  );
+          ),
+        );
 }

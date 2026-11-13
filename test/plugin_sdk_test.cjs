@@ -120,3 +120,29 @@ test('storage update preserves expected snapshot and retries competing writes', 
   h.context.__tideResolve(h.requests[3].id, true, null);
   assert.deepEqual(await result, {count: 5});
 });
+
+test('chat capabilities bind concurrent invocations without exposing the token', async () => {
+  const h = host();
+  h.run(`tide.registerTool('reply', async (args, context) => {
+    const info = await tide.chat.getContext(context);
+    return context.chat.sendText({text: args.text, requestId: args.key, contextToken: 'forged'});
+  })`);
+  const first = h.call('tool', 'reply', {__tideInvocation:true,args:{text:'a',key:'a'},contextToken:'token-a'});
+  const second = h.call('tool', 'reply', {__tideInvocation:true,args:{text:'b',key:'b'},contextToken:'token-b'});
+  await h.tick();
+  const contexts = h.requests.splice(0);
+  assert.equal(contexts.length,2);
+  for (const request of contexts) h.context.__tideResolve(request.id,{botId:request.args.contextToken},null);
+  await h.tick();
+  const sends = h.requests.splice(0);
+  assert.deepEqual(sends.map(r=>[r.args.text,r.args.contextToken]),[['a','token-a'],['b','token-b']]);
+  for (const request of sends) h.context.__tideResolve(request.id,{status:'sent',messageId:request.args.requestId},null);
+  assert.equal((await first).messageId,'a');
+  assert.equal((await second).messageId,'b');
+});
+test('legacy handler input remains intact and missing context rejects chat APIs', async () => {
+  const h = host();
+  h.run(`tide.registerTool('legacy', args => args); tide.registerTool('send', (args,ctx)=>ctx.chat.sendText({text:'x',requestId:'x'}))`);
+  assert.deepEqual(await h.call('tool','legacy',{hello:'world'}),{hello:'world'});
+  await assert.rejects(h.call('tool','send',{}),/requires a tool invocation/);
+});

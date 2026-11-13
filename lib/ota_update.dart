@@ -21,11 +21,11 @@ class _DownloadCancelled implements Exception {}
 class OtaUpdate {
   static const _channel = MethodChannel('tidebot.native.channel');
   static const _releaseApi =
-      'https://api.github.com/repos/yutan123/TideBot-OTA/releases';
+      'https://api.github.com/repos/yutan123/TideBot/releases';
   static const _releaseApiFallbacks = <String>[
-    'https://ghproxy.net/https://api.github.com/repos/yutan123/TideBot-OTA/releases',
-    'https://mirror.ghproxy.com/https://api.github.com/repos/yutan123/TideBot-OTA/releases',
-    'https://gh-proxy.com/https://api.github.com/repos/yutan123/TideBot-OTA/releases',
+    'https://ghproxy.net/https://api.github.com/repos/yutan123/TideBot/releases',
+    'https://mirror.ghproxy.com/https://api.github.com/repos/yutan123/TideBot/releases',
+    'https://gh-proxy.com/https://api.github.com/repos/yutan123/TideBot/releases',
   ];
 
   static Future<void> checkOncePerDay() async {

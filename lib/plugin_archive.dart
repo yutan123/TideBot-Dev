@@ -1,3 +1,4 @@
+import 'plugin_media_contract.dart';
 import 'dart:convert';
 
 import 'package:archive/archive.dart';
@@ -132,6 +133,28 @@ class PluginArchive {
         !files.containsKey(entry)) {
       throw const FormatException('插件 manifest 的 id/name/version/entry 无效');
     }
+    if (!{'script', 'commonjs'}.contains(m['entryFormat'] ?? 'script'))
+      throw const FormatException('entryFormat 必须为 script/commonjs');
+    for (final field in ['modules', 'resources']) {
+      final paths = m[field] ?? [];
+      if (paths is! List ||
+          paths.length > 255 ||
+          paths.toSet().length != paths.length)
+        throw FormatException('$field 必须为不重复的包内路径数组，最多 255 项');
+      var total = files[entry]!.length;
+      for (final path in paths) {
+        if (path is! String || !_safeRelative(path) || !files.containsKey(path))
+          throw FormatException('$field 路径无效或不存在');
+        if (field == 'modules') {
+          if ((!path.endsWith('.js') && !path.endsWith('.json')) ||
+              files[path]!.length > 2 * 1024 * 1024)
+            throw const FormatException('模块必须是 JS/JSON，单文件不超过 2 MiB');
+          total += files[path]!.length;
+        }
+      }
+      if (field == 'modules' && total > 3 * 1024 * 1024)
+        throw const FormatException('入口与模块合计超过 3 MiB');
+    }
     final icon = m['icon'];
     if (icon != null &&
         (icon is! String || !_safeRelative(icon) || !files.containsKey(icon))) {
@@ -182,8 +205,10 @@ class PluginArchive {
     }
     final permissions = m['permissions'] ?? [];
     if (permissions is! List ||
-        permissions.any((item) => !{'storage', 'network'}.contains(item))) {
-      throw const FormatException('permissions 只支持 storage/network');
+        permissions.any(
+          (item) => !PluginMediaContract.permissions.contains(item),
+        )) {
+      throw const FormatException('permissions 包含不支持的权限');
     }
     final origins = m['networkOrigins'] ?? [];
     if (origins is! List) throw const FormatException('networkOrigins 必须为数组');
@@ -201,10 +226,18 @@ class PluginArchive {
       final content = files[ui['entry']]!;
       if (content.length > 1024 * 1024)
         throw const FormatException('UI 布局超过 1 MB');
-      final layout = jsonDecode(utf8.decode(content));
-      if (layout is! Map)
-        throw const FormatException('ui.entry 必须是声明式 JSON 对象');
-      PluginContract.layout(layout);
+      final type = ui['type'] ?? 'declarative';
+      if (!{'declarative', 'web'}.contains(type))
+        throw const FormatException('ui.type 必须为 declarative/web');
+      if (type == 'web') {
+        if (!(ui['entry'] as String).endsWith('.html'))
+          throw const FormatException('网页入口必须为 .html');
+      } else {
+        final layout = jsonDecode(utf8.decode(content));
+        if (layout is! Map)
+          throw const FormatException('ui.entry 必须是声明式 JSON 对象');
+        PluginContract.layout(layout);
+      }
     }
     // Reject file/directory conflicts before any filesystem mutation.
     for (final name in files.keys) {

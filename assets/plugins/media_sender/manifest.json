@@ -1,0 +1,53 @@
+{
+  "apiVersion": 1,
+  "id": "author.media_sender",
+  "name": "媒体发送示例",
+  "version": "1.0.0",
+  "author": "author",
+  "entry": "main.js",
+  "permissions": [
+    "chat.send",
+    "media.download",
+    "network"
+  ],
+  "networkOrigins": [
+    "https://cdn.example.com"
+  ],
+  "tools": [
+    {
+      "name": "send_media",
+      "description": "将指定类型的消息发送到当前会话；成功后不得重复发送同一内容。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "text",
+              "image",
+              "video",
+              "audio"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 16000
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "requestId": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "kind",
+          "requestId"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

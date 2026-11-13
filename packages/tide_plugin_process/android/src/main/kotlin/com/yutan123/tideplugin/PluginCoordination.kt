@@ -25,7 +25,7 @@ internal object PluginCoordination {
 
     fun acquire(owner: Any, key: String, ticket: String, result: MethodChannel.Result) {
         check(Looper.myLooper() == Looper.getMainLooper())
-        require(key == "lifecycle" || key.startsWith("storage:"))
+        require(key == "lifecycle" || key.startsWith("storage:") || key.startsWith("chat:"))
         val lock = locks.getOrPut(key) { Lock() }
         val waiter = Waiter(owner, ticket, result)
         if (lock.holder == null) {
