@@ -142,6 +142,37 @@ class MainActivity: FlutterActivity() {
         nativeChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
         nativeChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
+                "openChatFile" -> {
+                    try {
+                        val path = call.argument<String>("path")
+                        require(!path.isNullOrBlank()) { "文件路径为空" }
+                        val source = File(path)
+                        require(source.isFile && source.canRead()) { "文件不存在或无法读取" }
+                        // Share a cached copy: external apps cannot read sandbox file:// URLs.
+                        val directory = File(cacheDir, "open_files/${java.util.UUID.randomUUID()}")
+                        check(directory.mkdirs()) { "无法准备文件" }
+                        val shared = File(directory, source.name)
+                        source.copyTo(shared)
+                        val uri = androidx.core.content.FileProvider.getUriForFile(
+                            this, "$packageName.fileprovider", shared)
+                        val extension = shared.extension.lowercase(java.util.Locale.ROOT)
+                        val mime = android.webkit.MimeTypeMap.getSingleton()
+                            .getMimeTypeFromExtension(extension) ?: "*/*"
+                        val view = Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(uri, mime)
+                            clipData = android.content.ClipData.newRawUri("文件附件", uri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        val chooser = Intent.createChooser(view, "选择应用打开").apply {
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            clipData = view.clipData
+                        }
+                        startActivity(chooser)
+                        result.success(null)
+                    } catch (error: Exception) {
+                        result.error("OPEN_FILE_FAILED", error.message, null)
+                    }
+                }
                 "stageFullRestore" -> backgroundResult(result, "RESTORE_PREPARE_FAILED") {
                     TideColdRestore.stage(this, call.argument<String>("path") ?: error("Missing restore path"))
                     true

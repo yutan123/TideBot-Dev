@@ -55,6 +55,7 @@ import 'device_capability_service.dart';
 import 'chat_content.dart';
 import 'chat_protocol.dart';
 import 'skill_runtime.dart';
+import 'skill_context.dart';
 import 'skill_package.dart';
 import 'world_book_service.dart';
 import 'tool_call_accumulator.dart';
@@ -169,10 +170,12 @@ class AIManager {
   static final _cacheDiagnostics = ChatCacheDiagnostics();
   static int _requestSequence = 0;
 
-  void _logCacheUsage(Map usage,
-      {required String stage,
-      required String requestId,
-      Map<String, dynamic> responseMetadata = const {}}) {
+  void _logCacheUsage(
+    Map usage, {
+    required String stage,
+    required String requestId,
+    Map<String, dynamic> responseMetadata = const {},
+  }) {
     final cached = cachedPromptTokens(usage);
     final prompt = usage['prompt_tokens'] ?? usage['input_tokens'];
     AppLogService.instance.addJson('CACHE', '分请求缓存统计', {
@@ -182,14 +185,19 @@ class AIManager {
       'usage': usage,
       'prompt_tokens': prompt,
       'cached_tokens': cached,
-      'cache_creation_input_tokens': usage['cache_creation_input_tokens'] ??
+      'cache_creation_input_tokens':
+          usage['cache_creation_input_tokens'] ??
           usage['cache_creation_tokens'],
       'cache_reported': cached != null,
     });
   }
 
-  void _logRequestPrefix(String scope, String requestId,
-      Map<String, dynamic> payload, Map<String, dynamic> window) {
+  void _logRequestPrefix(
+    String scope,
+    String requestId,
+    Map<String, dynamic> payload,
+    Map<String, dynamic> window,
+  ) {
     if (!AppLogService.instance.enabled) {
       _cacheDiagnostics.clear();
       return;
@@ -197,11 +205,16 @@ class AIManager {
     // 缓存诊断使用紧凑 JSON 格式，避免大量空行占用日志空间
     final diagnostics = {
       ..._cacheDiagnostics.record(
-          scope: scope, requestId: requestId, payload: payload),
+        scope: scope,
+        requestId: requestId,
+        payload: payload,
+      ),
       'history_window': window,
     };
-    AppLogService.instance
-        .add('CACHE', '完整请求前缀变化诊断\n${jsonEncode(diagnostics)}');
+    AppLogService.instance.add(
+      'CACHE',
+      '完整请求前缀变化诊断\n${jsonEncode(diagnostics)}',
+    );
   }
 
   Future<Map<String, dynamic>> sendMessage({
@@ -231,182 +244,199 @@ class AIManager {
     bool isVoiceCall = false,
     bool useJarvis = false,
     AICancellationToken? cancellationToken,
+    bool deferPluginDelivery = false,
     void Function(String delta)? onDelta,
   }) async {
     final activity = task == AIRequestTask.chat && !diaryTask && !quoteTask
         ? await ProactiveRequestGate.begin(await DBManager().database, botId)
         : null;
     if (activity != null) {
-      AppLogService.instance
-          .add('PROACTIVE_GATE', '普通聊天开始，取消旧主动回复并占用请求：bot=$botId');
+      AppLogService.instance.add(
+        'PROACTIVE_GATE',
+        '普通聊天开始，取消旧主动回复并占用请求：bot=$botId',
+      );
     }
     try {
       if (activity != null) {
         await NativeBackgroundCoordinator.interruptProactiveReply(botId);
         unawaited(NativeBackgroundCoordinator.synchronize());
       }
-      return await MediaStorageService.instance.withMediaUse(() async {
-        if (imagePath != null)
-          imagePath = await MediaStorageService.instance.resolve(imagePath!);
-        if (imagePaths != null)
-          imagePaths = await Future.wait(
-              imagePaths!.map(MediaStorageService.instance.resolve));
-        if (imageAttachments != null)
-          imageAttachments = await Future.wait(
-              imageAttachments!.map(MediaStorageService.instance.resolve));
-        if (audioPath != null)
-          audioPath = await MediaStorageService.instance.resolve(audioPath!);
+      return await MessageDeliveryService.instance.afterReply(
+        botId,
+        () => MediaStorageService.instance.withMediaUse(() async {
+          if (imagePath != null)
+            imagePath = await MediaStorageService.instance.resolve(imagePath!);
+          if (imagePaths != null)
+            imagePaths = await Future.wait(
+              imagePaths!.map(MediaStorageService.instance.resolve),
+            );
+          if (imageAttachments != null)
+            imageAttachments = await Future.wait(
+              imageAttachments!.map(MediaStorageService.instance.resolve),
+            );
+          if (audioPath != null)
+            audioPath = await MediaStorageService.instance.resolve(audioPath!);
 
-        cancellationToken?.throwIfCancelled();
-        final executionLease = await RequestExecutionLease.acquire();
-        try {
-          if (diaryTask) task = AIRequestTask.diary;
-          if (quoteTask) task = AIRequestTask.dailyQuote;
-          diaryTask = task == AIRequestTask.diary;
-          quoteTask = task == AIRequestTask.dailyQuote;
-          if (task.internal) {
-            persistResponse = false;
-            includeChatHistory = false;
-            requestHistory = null;
-            enableAutoSummary = false;
-            skipLifeState = true;
-            allowTools = false;
-            allowStickers = false;
-            useJarvis = false;
-            activeGame = null;
-            onDelta = null;
-            forceSingleReply = true;
-          }
-          final prefs = await SharedPreferences.getInstance();
-          const primaryLocal = '';
-          const backupLocal = '';
-          final backupRemote =
-              (prefs.getString('backup_model_$botId') ?? '').trim();
-          final matchingBots = (await DBManager().getAllBots())
-              .where((bot) => bot['id']?.toString() == botId)
-              .toList();
-          final primaryRemote = matchingBots.isEmpty
-              ? ''
-              : (matchingBots.first['chat_model']?.toString().trim() ?? '');
-          // 首次严格使用主模型；失败后优先使用备用模型，再给备用模型一次重试。
-          // 过去主模型是远程时 provider 被错误置空，导致永远落到列表第一个服务商。
-          final primary = {'local': primaryLocal, 'provider': primaryRemote};
-          final backup = {'local': backupLocal, 'provider': backupRemote};
-          bool configured(Map<String, String> candidate) =>
-              candidate['local']!.isNotEmpty ||
-              candidate['provider']!.isNotEmpty;
-          // Never attempt an empty primary. A configured backup must be usable even
-          // when the bot has no primary model selected.
-          final attempts = <Map<String, String>>[
-            if (configured(primary)) primary,
-            if (configured(backup) && backup['provider'] != primary['provider'])
-              backup,
-          ];
-          if (attempts.isEmpty) {
-            return {'error': '未配置聊天模型，请先在角色设置中选择聊天或备用模型'};
-          }
-
-          final vitalTracked =
-              persistResponse && !skipLifeState && activeGame == null;
-          final vitalCutoff = DateTime.now().millisecondsSinceEpoch;
-          if (vitalTracked) {
-            AppLogService.instance.add('AI_TRACE', '请求前生活状态开始 bot=$botId');
-            final vitalContext = await BotVitalSignsService.instance
-                .beforeRequest(botId, allowSilence: allowTools);
-            AppLogService.instance.add('AI_TRACE', '请求前生活状态完成 bot=$botId');
-            extraSystemPrompt = '$vitalContext\n$extraSystemPrompt';
-          }
+          cancellationToken?.throwIfCancelled();
+          final executionLease = await RequestExecutionLease.acquire();
           try {
-            Map<String, dynamic>? lastFailure;
-            var attempted = 0;
-            for (var index = 0; index < attempts.length; index++) {
-              await cancellationToken?.checkRequestAllowed();
-              final candidate = attempts[index];
-              final selectedImagePaths = <String>[
-                if (imagePath?.isNotEmpty == true) imagePath!,
-                ...?imagePaths,
-                ...?imageAttachments,
-              ];
-              try {
-                attempted++;
-                final result = await _sendMessageOnce(
-                  botId: botId,
-                  text: text,
-                  imagePath: selectedImagePaths.isEmpty
-                      ? null
-                      : selectedImagePaths.first,
-                  imagePaths: selectedImagePaths,
-                  audioPath: audioPath,
-                  activeGame: activeGame,
-                  persistResponse: persistResponse,
-                  currentMessageIds: currentMessageIds,
-                  beginResponseCommit: beginResponseCommit,
-                  includeChatHistory: includeChatHistory,
-                  requestHistory: requestHistory,
-                  enableAutoSummary: enableAutoSummary,
-                  skipLifeState: skipLifeState,
-                  task: task,
-                  diaryTask: diaryTask,
-                  quoteTask: quoteTask,
-                  allowTools: allowTools,
-                  allowStickers: allowStickers,
-                  forceSingleReply: forceSingleReply,
-                  notifyResponse: notifyResponse,
-                  extraSystemPrompt: extraSystemPrompt,
-                  isVoiceCall: isVoiceCall,
-                  useJarvis: useJarvis,
-                  cancellationToken: cancellationToken,
-                  // 不要为了备用重试延迟主请求的 SSE：此前首两次被强制关闭流式，
-                  // 部分服务商在非流式模式下长期不返回，聊天室最终只看到超时。
-                  onDelta: onDelta,
-                  forcedLocalId: candidate['local']!,
-                  forcedProviderId: candidate['provider']!,
-                );
-                if (result['success'] == true) {
-                  if (vitalTracked)
-                    await BotVitalSignsService.instance
-                        .afterRequest(botId, result, vitalCutoff);
-                  return result;
-                }
-                lastFailure = result;
-                final code =
-                    int.tryParse(result['error_code']?.toString() ?? '') ?? 0;
-                final retryable =
-                    result['error_code']?.toString() == 'network' ||
-                        code == 429 ||
-                        code >= 500;
-                if (!retryable || index == attempts.length - 1) break;
-              } on AICancelledException {
-                rethrow;
-              }
+            if (diaryTask) task = AIRequestTask.diary;
+            if (quoteTask) task = AIRequestTask.dailyQuote;
+            diaryTask = task == AIRequestTask.diary;
+            quoteTask = task == AIRequestTask.dailyQuote;
+            if (task.internal) {
+              persistResponse = false;
+              includeChatHistory = false;
+              requestHistory = null;
+              enableAutoSummary = false;
+              skipLifeState = true;
+              allowTools = false;
+              allowStickers = false;
+              useJarvis = false;
+              activeGame = null;
+              onDelta = null;
+              forceSingleReply = true;
             }
-            if (vitalTracked)
-              BotVitalSignsService.instance.failedRequest(botId);
-            return {
-              ...?lastFailure,
-              'error':
-                  '模型请求未成功（实际尝试 $attempted 次）。${lastFailure?['error'] ?? ''}',
-            };
-          } catch (_) {
-            if (vitalTracked)
-              BotVitalSignsService.instance.failedRequest(botId);
-            rethrow;
+            final prefs = await SharedPreferences.getInstance();
+            const primaryLocal = '';
+            const backupLocal = '';
+            final backupRemote = (prefs.getString('backup_model_$botId') ?? '')
+                .trim();
+            final matchingBots = (await DBManager().getAllBots())
+                .where((bot) => bot['id']?.toString() == botId)
+                .toList();
+            final primaryRemote = matchingBots.isEmpty
+                ? ''
+                : (matchingBots.first['chat_model']?.toString().trim() ?? '');
+            // 首次严格使用主模型；失败后优先使用备用模型，再给备用模型一次重试。
+            // 过去主模型是远程时 provider 被错误置空，导致永远落到列表第一个服务商。
+            final primary = {'local': primaryLocal, 'provider': primaryRemote};
+            final backup = {'local': backupLocal, 'provider': backupRemote};
+            bool configured(Map<String, String> candidate) =>
+                candidate['local']!.isNotEmpty ||
+                candidate['provider']!.isNotEmpty;
+            // Never attempt an empty primary. A configured backup must be usable even
+            // when the bot has no primary model selected.
+            final attempts = <Map<String, String>>[
+              if (configured(primary)) primary,
+              if (configured(backup) &&
+                  backup['provider'] != primary['provider'])
+                backup,
+            ];
+            if (attempts.isEmpty) {
+              return {'error': '未配置聊天模型，请先在角色设置中选择聊天或备用模型'};
+            }
+
+            final vitalTracked =
+                persistResponse && !skipLifeState && activeGame == null;
+            final vitalCutoff = DateTime.now().millisecondsSinceEpoch;
+            if (vitalTracked) {
+              AppLogService.instance.add('AI_TRACE', '请求前生活状态开始 bot=$botId');
+              final vitalContext = await BotVitalSignsService.instance
+                  .beforeRequest(botId, allowSilence: allowTools);
+              AppLogService.instance.add('AI_TRACE', '请求前生活状态完成 bot=$botId');
+              extraSystemPrompt = '$vitalContext\n$extraSystemPrompt';
+            }
+            try {
+              Map<String, dynamic>? lastFailure;
+              var attempted = 0;
+              for (var index = 0; index < attempts.length; index++) {
+                await cancellationToken?.checkRequestAllowed();
+                final candidate = attempts[index];
+                final selectedImagePaths = <String>[
+                  if (imagePath?.isNotEmpty == true) imagePath!,
+                  ...?imagePaths,
+                  ...?imageAttachments,
+                ];
+                try {
+                  attempted++;
+                  final result = await _sendMessageOnce(
+                    botId: botId,
+                    text: text,
+                    imagePath: selectedImagePaths.isEmpty
+                        ? null
+                        : selectedImagePaths.first,
+                    imagePaths: selectedImagePaths,
+                    audioPath: audioPath,
+                    activeGame: activeGame,
+                    persistResponse: persistResponse,
+                    currentMessageIds: currentMessageIds,
+                    beginResponseCommit: beginResponseCommit,
+                    includeChatHistory: includeChatHistory,
+                    requestHistory: requestHistory,
+                    enableAutoSummary: enableAutoSummary,
+                    skipLifeState: skipLifeState,
+                    task: task,
+                    diaryTask: diaryTask,
+                    quoteTask: quoteTask,
+                    allowTools: allowTools,
+                    allowStickers: allowStickers,
+                    forceSingleReply: forceSingleReply,
+                    notifyResponse: notifyResponse,
+                    extraSystemPrompt: extraSystemPrompt,
+                    isVoiceCall: isVoiceCall,
+                    useJarvis: useJarvis,
+                    cancellationToken: cancellationToken,
+                    // 不要为了备用重试延迟主请求的 SSE：此前首两次被强制关闭流式，
+                    // 部分服务商在非流式模式下长期不返回，聊天室最终只看到超时。
+                    onDelta: onDelta,
+                    forcedLocalId: candidate['local']!,
+                    forcedProviderId: candidate['provider']!,
+                  );
+                  if (result['success'] == true) {
+                    if (vitalTracked)
+                      await BotVitalSignsService.instance.afterRequest(
+                        botId,
+                        result,
+                        vitalCutoff,
+                      );
+                    return result;
+                  }
+                  lastFailure = result;
+                  final code =
+                      int.tryParse(result['error_code']?.toString() ?? '') ?? 0;
+                  final retryable =
+                      result['error_code']?.toString() == 'network' ||
+                      code == 429 ||
+                      code >= 500;
+                  if (!retryable || index == attempts.length - 1) break;
+                } on AICancelledException {
+                  rethrow;
+                }
+              }
+              if (vitalTracked)
+                BotVitalSignsService.instance.failedRequest(botId);
+              return {
+                ...?lastFailure,
+                'error':
+                    '模型请求未成功（实际尝试 $attempted 次）。${lastFailure?['error'] ?? ''}',
+              };
+            } catch (_) {
+              if (vitalTracked)
+                BotVitalSignsService.instance.failedRequest(botId);
+              rethrow;
+            }
+          } finally {
+            await executionLease.release();
           }
-        } finally {
-          await executionLease.release();
-        }
-      });
+        }),
+        deferDelivery: deferPluginDelivery,
+      );
     } finally {
       if (activity != null) {
         try {
           await activity.release();
         } catch (error) {
-          AppLogService.instance
-              .add('PROACTIVE_GATE', '普通聊天租约释放失败，将自动过期：$error');
+          AppLogService.instance.add(
+            'PROACTIVE_GATE',
+            '普通聊天租约释放失败，将自动过期：$error',
+          );
         }
         unawaited(NativeBackgroundCoordinator.synchronize());
-        AppLogService.instance
-            .add('PROACTIVE_GATE', '普通聊天结束，按正常间隔等待下次主动回复：bot=$botId');
+        AppLogService.instance.add(
+          'PROACTIVE_GATE',
+          '普通聊天结束，按正常间隔等待下次主动回复：bot=$botId',
+        );
       }
     }
   }
@@ -573,15 +603,17 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       if (modelName.isEmpty) modelName = provider['name'].toString().trim();
       if (modelName.contains(','))
         modelName = modelName.split(',').first.trim();
-      final baseUrl = provider['base_url']
-              ?.toString()
-              .trim()
-              .replaceFirst(RegExp(r'/+$'), '') ??
+      final baseUrl =
+          provider['base_url']?.toString().trim().replaceFirst(
+            RegExp(r'/+$'),
+            '',
+          ) ??
           '';
       if (baseUrl.isEmpty || modelName.isEmpty) return '';
 
       // Current user content is supplied separately, not duplicated as history.
-      final priorHistory = !proactive &&
+      final priorHistory =
+          !proactive &&
               history.isNotEmpty &&
               history.last['role'] == 'user' &&
               history.last['content'] == text
@@ -595,20 +627,22 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           .toList()
           .reversed
           .map((item) {
-        final role = item['role']?.toString() == 'user' ? '用户' : '角色';
-        final type = item['type']?.toString() ?? 'text';
-        final content = features.historyText(item);
-        if (type == 'inner_thought') {
-          return '$role（内心独白）：$content';
-        }
-        return '$role：$content';
-      }).join('\n');
+            final role = item['role']?.toString() == 'user' ? '用户' : '角色';
+            final type = item['type']?.toString() ?? 'text';
+            final content = features.historyText(item);
+            if (type == 'inner_thought') {
+              return '$role（内心独白）：$content';
+            }
+            return '$role：$content';
+          })
+          .join('\n');
 
       // 提取角色上一轮的内心独白
       String? lastInnerThought;
-      for (final item in features.innerThought
-          ? history.reversed
-          : <Map<String, dynamic>>[]) {
+      for (final item
+          in features.innerThought
+              ? history.reversed
+              : <Map<String, dynamic>>[]) {
         if (item['role']?.toString() == 'assistant' &&
             item['type']?.toString() == 'inner_thought') {
           lastInnerThought = item['content']?.toString();
@@ -617,13 +651,20 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       }
       final innerThoughtContext =
           lastInnerThought != null && !recent.contains(lastInnerThought)
-              ? '\n角色上一轮内心独白：$lastInnerThought'
-              : '';
+          ? '\n角色上一轮内心独白：$lastInnerThought'
+          : '';
 
       // 获取时间上下文（当前时间、日程、节假日）
       final now = DateTime.now();
-      final weekday =
-          ['周一', '周二', '周三', '周四', '周五', '周六', '周日'][now.weekday - 1];
+      final weekday = [
+        '周一',
+        '周二',
+        '周三',
+        '周四',
+        '周五',
+        '周六',
+        '周日',
+      ][now.weekday - 1];
       final timeStr =
           '${now.year}年${now.month}月${now.day}日 $weekday ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
 
@@ -644,12 +685,12 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           {
             'role': 'system',
             'content':
-                '${features.advisorPrompt(_jarvisPrompt)}\n${proactive ? features.proactiveInstructions(proactiveContactInstructions) : ''}\n参考回复必须符合角色聊天输出要求：使用角色语气，给出恰好三条方向和三条可直接作为聊天正文的参考回复；不含系统解释、工具协议、心情标签或时间戳。${features.advisorThoughtInstructions}'
+                '${features.advisorPrompt(_jarvisPrompt)}\n${proactive ? features.proactiveInstructions(proactiveContactInstructions) : ''}\n参考回复必须符合角色聊天输出要求：使用角色语气，给出恰好三条方向和三条可直接作为聊天正文的参考回复；不含系统解释、工具协议、心情标签或时间戳。${features.advisorThoughtInstructions}',
           },
           {
             'role': 'user',
             'content':
-                '# 角色信息\n角色：${bot['name'] ?? ''}\n说话方式与人设：${bot['prompt'] ?? ''}\n${bot['desc'] ?? ''}\n\n# 时间与日程\n当前时间：$timeStr$lifeScheduleContext\n\n# 背景知识\n$profileContext\n$worldBookContext\n\n# 最近对话（最近10轮）\n$recent$innerThoughtContext\n\n# ${proactive ? '应用触发任务（用户没有新发言）' : '用户最新消息'}${imagePaths.isNotEmpty ? '（含${imagePaths.length}张图片）' : ''}\n$text${imagePaths.isNotEmpty ? '\n\n图片内容识别结果见上方' : ''}'
+                '# 角色信息\n角色：${bot['name'] ?? ''}\n说话方式与人设：${bot['prompt'] ?? ''}\n${bot['desc'] ?? ''}\n\n# 时间与日程\n当前时间：$timeStr$lifeScheduleContext\n\n# 背景知识\n$profileContext\n$worldBookContext\n\n# 最近对话（最近10轮）\n$recent$innerThoughtContext\n\n# ${proactive ? '应用触发任务（用户没有新发言）' : '用户最新消息'}${imagePaths.isNotEmpty ? '（含${imagePaths.length}张图片）' : ''}\n$text${imagePaths.isNotEmpty ? '\n\n图片内容识别结果见上方' : ''}',
           },
         ],
       };
@@ -673,7 +714,7 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
                 if (part is Map && part['type'] == 'image_url') {
                   return {
                     ...part,
-                    'image_url': {'url': '[图片]'}
+                    'image_url': {'url': '[图片]'},
                   };
                 }
                 return part;
@@ -689,7 +730,7 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           http.Request('POST', Uri.parse('$baseUrl/chat/completions'))
             ..headers.addAll({
               'Content-Type': 'application/json',
-              'Authorization': 'Bearer ${provider['api_key']}'
+              'Authorization': 'Bearer ${provider['api_key']}',
             })
             ..body = jsonEncode(payload);
       void cancelRequest() => client.close();
@@ -698,8 +739,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       late http.Response response;
       try {
         await cancellationToken?.checkRequestAllowed();
-        streamed =
-            await client.send(request).timeout(const Duration(seconds: 30));
+        streamed = await client
+            .send(request)
+            .timeout(const Duration(seconds: 30));
         response = await http.Response.fromStream(streamed);
         cancellationToken?.throwIfCancelled();
       } finally {
@@ -707,20 +749,25 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         client.close();
       }
       if (streamed.statusCode != 200) {
-        AppLogService.instance
-            .add('JARVIS', '军师请求失败：HTTP ${streamed.statusCode}');
+        AppLogService.instance.add(
+          'JARVIS',
+          '军师请求失败：HTTP ${streamed.statusCode}',
+        );
         return '';
       }
       final raw = _extractChatContent(
-              jsonDecode(utf8.decode(response.bodyBytes, allowMalformed: true)))
-          .trim();
+        jsonDecode(utf8.decode(response.bodyBytes, allowMalformed: true)),
+      ).trim();
       final start = raw.indexOf('{');
       final end = raw.lastIndexOf('}');
       if (start < 0 || end <= start) return '';
       final json = jsonDecode(raw.substring(start, end + 1));
       if (json is! Map) return '';
-      AppLogService.instance
-          .addJson('JARVIS', 'AI军师判断', Map<String, dynamic>.from(json));
+      AppLogService.instance.addJson(
+        'JARVIS',
+        'AI军师判断',
+        Map<String, dynamic>.from(json),
+      );
 
       // 提取结构化的军师建议
       final userAnalysis = json['user_analysis'] as Map?;
@@ -753,20 +800,23 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       final shouldShareOwn = botGuidance['should_share_own'] == true;
       final shareSuggestion = botGuidance['share_suggestion']?.toString() ?? '';
 
-      final boundaries = (botGuidance['boundaries'] as List?)
+      final boundaries =
+          (botGuidance['boundaries'] as List?)
               ?.map((e) => e.toString())
               .where((e) => e.trim().isNotEmpty)
               .join('；') ??
           '';
 
-      final referenceDirections = (botGuidance['reference_directions'] as List?)
+      final referenceDirections =
+          (botGuidance['reference_directions'] as List?)
               ?.map((e) => e.toString())
               .where((e) => e.trim().isNotEmpty)
               .take(3)
               .join('\n- ') ??
           '';
 
-      final referenceExamples = (botGuidance['reference_examples'] as List?)
+      final referenceExamples =
+          (botGuidance['reference_examples'] as List?)
               ?.map((e) => e.toString())
               .where((e) => e.trim().isNotEmpty)
               .take(3)
@@ -818,7 +868,8 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
 
       guidance.writeln('\n---');
       guidance.writeln(
-          '重要：以上是军师的策略建议。你必须用自己的人设、说话方式和当前上下文重新组织语言，绝对不能照抄参考句子。保留自己的性格、判断和边界，可有小脾气。');
+        '重要：以上是军师的策略建议。你必须用自己的人设、说话方式和当前上下文重新组织语言，绝对不能照抄参考句子。保留自己的性格、判断和边界，可有小脾气。',
+      );
 
       return guidance.toString();
     } catch (e) {
@@ -862,13 +913,14 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     final requestId =
         '${DateTime.now().microsecondsSinceEpoch}_${_requestSequence++}';
     final windowDiagnostic = <String, dynamic>{};
-    final voiceEnabled = persistResponse &&
+    final voiceEnabled =
+        persistResponse &&
         !task.internal &&
         !isVoiceCall &&
         await db.getKV('voice_reply_enabled') == 'true';
     final voiceChance = voiceEnabled
         ? (int.tryParse(await db.getKV('voice_reply_chance') ?? '') ?? 50)
-            .clamp(1, 100)
+              .clamp(1, 100)
         : 0;
 
     cancellationToken?.throwIfCancelled();
@@ -882,7 +934,8 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
 
     final ttsModel = bot['tts_model']?.toString().trim() ?? '';
     // Decide once before generation so the model can provide speech direction.
-    final randomVoice = voiceEnabled &&
+    final randomVoice =
+        voiceEnabled &&
         ttsModel.isNotEmpty &&
         Random.secure().nextInt(100) < voiceChance;
     // 提取该 bot 配置的 provider id（存在 bots.chat_model 字段，由聊天室设置弹窗写入）
@@ -926,22 +979,30 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       final context = <String>[];
       if (task.needsHistory) {
         final rows = recentTaskMessages(
-            await db.queryMessages(botId, descending: true, limit: 240));
+          await db.queryMessages(botId, descending: true, limit: 240),
+        );
         context.add('【带时间的近期对话，引用资料】\n${taskTranscript(rows)}');
       }
       if (task.needsProfile && task != AIRequestTask.cognitionReview) {
         final profiles = (await db.queryMemories(botId)).where(
-            (m) => const ['角色眼中的你', '角色的自我认知', '关系'].contains(m['category']));
+          (m) => const ['角色眼中的你', '角色的自我认知', '关系'].contains(m['category']),
+        );
         context.add('【角色认知】${jsonEncode(profiles.toList())}');
       }
       if (task.needsWorldBook) {
         final entries = await WorldBookService.instance
             .activateEntriesIntelligent(
-                botId: botId, conversationText: text, maxResults: 10);
+              botId: botId,
+              conversationText: text,
+              maxResults: 10,
+            );
         context.add(WorldBookService.formatActivatedEntries(entries));
         final plans = (await db.queryMemories(botId, limit: 200))
-            .where((m) => RegExp('约定|预约|计划|待办|承诺')
-                .hasMatch('${m['title']} ${m['content']}'))
+            .where(
+              (m) => RegExp(
+                '约定|预约|计划|待办|承诺',
+              ).hasMatch('${m['title']} ${m['content']}'),
+            )
             .take(20)
             .toList();
         context.add('【已有约定线索，核实日期及是否仍有效】${jsonEncode(plans)}');
@@ -955,13 +1016,14 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     } else {
       final timeAware = (await db.getKV('time_awareness')) != 'false';
       final history = historyBeforeCurrentBatch(
-          requestHistory ??
-              (includeChatHistory
-                  ? await db
+        requestHistory ??
+            (includeChatHistory
+                ? await db
                       .getChatHistory(botId)
                       .timeout(const Duration(seconds: 8))
-                  : <Map<String, dynamic>>[]),
-          currentMessageIds);
+                : <Map<String, dynamic>>[]),
+        currentMessageIds,
+      );
       // 世界书统一管理所有记忆：特殊字段每轮固定注入，普通记忆由关键词匹配激活。
       // 读取三个核心设定字段（独立于普通世界书条目）
       final allMemories = activeGame == null
@@ -1016,13 +1078,19 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       final conversationForMatch = memoryConversationQuery(text, history);
       final matchedMemories = activeGame == null
           ? await MemoryRetrievalService.instance.search(
-              botId, conversationForMatch,
-              exclude: recentMemories, limit: 5, semanticQuery: text)
+              botId,
+              conversationForMatch,
+              exclude: recentMemories,
+              limit: 5,
+              semanticQuery: text,
+            )
           : <Map<String, dynamic>>[];
       final worldBookContext = MemoryRetrievalService.format(matchedMemories);
       if (activeGame == null) {
-        AppLogService.instance.add('MEMORY',
-            '记忆注入 recent=${recentMemories.map((r) => r['id']).toList()} matched=${matchedMemories.map(memoryIdentity).toList()}');
+        AppLogService.instance.add(
+          'MEMORY',
+          '记忆注入 recent=${recentMemories.map((r) => r['id']).toList()} matched=${matchedMemories.map(memoryIdentity).toList()}',
+        );
       }
       stickerEmotions = allowTools && allowStickers
           ? await _availableStickerEmotions(db)
@@ -1062,14 +1130,16 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       final currentImageDescriptions = <int, String>{};
       // 本轮图片不进入历史图片工具。使用主模型识图时直接附着图片；选择
       // 专用识图模型时，先由该模型识别,再把文本结果转述给聊天模型。
-      final visionId = (await SharedPreferences.getInstance())
+      final visionId =
+          (await SharedPreferences.getInstance())
               .getString('vision_model_$botId')
               ?.trim() ??
           '';
       const primaryVisionModel = '__use_primary_vision__';
       // 未配置识图模型时默认使用主模型识图，而不是只发送文本占位符
-      final effectiveVisionId =
-          visionId.isEmpty ? primaryVisionModel : visionId;
+      final effectiveVisionId = visionId.isEmpty
+          ? primaryVisionModel
+          : visionId;
       if (effectiveImagePaths.isNotEmpty &&
           effectiveVisionId.isNotEmpty &&
           effectiveVisionId != primaryVisionModel) {
@@ -1094,8 +1164,10 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       for (final msg in history) {
         if (msg['type']?.toString() != 'shared_post') continue;
         final key = _sharedPostHistoryKey(msg);
-        sharedPostContexts[key] =
-            await _sharedPostModelContextForMessage(db, msg);
+        sharedPostContexts[key] = await _sharedPostModelContextForMessage(
+          db,
+          msg,
+        );
       }
       tools = allowTools
           ? await _buildNativeTools(
@@ -1122,11 +1194,15 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
               stickerEmotions: stickerEmotions,
             )
           : '';
-      // External skill instructions are returned only by get_tool_package,
-      // never injected wholesale into unrelated requests.
+      // Enabled declarative guidance belongs in the prompt, including when
+      // this request cannot call tools. Executable tools remain lazy packages.
+      final skillContext = task.internal
+          ? ''
+          : buildEnabledSkillContext(await db.querySkills(botId: botId));
       final lifeContext = skipLifeState ? '' : await _lifeStateContext(botId);
-      final deviceContext =
-          await DeviceCapabilityService.instance.contextFor(botId);
+      final deviceContext = await DeviceCapabilityService.instance.contextFor(
+        botId,
+      );
       final deviceContextPrompt = deviceContext.isEmpty
           ? ''
           : '\n【经用户逐项授权的设备上下文】${DeviceCapabilityService.instance.encodeContext(deviceContext)}。仅在当前问题直接相关时使用；不得主动逐项复述、推断未授权信息或声称持续监控。';
@@ -1154,11 +1230,11 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       final baseSystemPrompt = diaryTask
           ? buildDiarySystemPrompt(bot)
           : quoteTask
-              ? '你正在执行内部今日一言任务，不是在聊天。角色：${bot['name']}；语气参考：${bot['prompt']}。只生成一条全天通用的短句，只输出单行的一个句子。禁止第二句、备选、编号、标题、解释、分析、标签、Markdown和工具调用。人设中的聊天输出格式不适用于此任务。'
-              : buildChatSystemPrompt(bot, activeGame, features) +
-                  (innerThoughtEnabled
-                      ? '\n\n【内心独白机制】\n内心独白功能已开启。每轮面向对方的文字回复必须先输出一段非空的内心独白，格式为 <inner_thought>独白内容</inner_thought>，闭合标签后再输出聊天正文，不得省略独白或输出空标签。独白用你的第一人称简短描述此刻的情绪、感受或愿望，与本轮对话相关；这是你的感受表达，不是模型推理过程，不要写分析步骤、系统规则、工具调用计划或声称尚未完成的操作已完成。reasoning_content 不算内心独白，独白必须写在 content 中。需要调用工具时先实际执行工具，在工具完成后的最终文字回复中输出独白和正文；单独的工具调用消息无需附带独白。'
-                      : '');
+          ? '你正在执行内部今日一言任务，不是在聊天。角色：${bot['name']}；语气参考：${bot['prompt']}。只生成一条全天通用的短句，只输出单行的一个句子。禁止第二句、备选、编号、标题、解释、分析、标签、Markdown和工具调用。人设中的聊天输出格式不适用于此任务。'
+          : buildChatSystemPrompt(bot, activeGame, features) +
+                (innerThoughtEnabled
+                    ? '\n\n【内心独白机制】\n内心独白功能已开启。每轮面向对方的文字回复必须先输出一段非空的内心独白，格式为 <inner_thought>独白内容</inner_thought>，闭合标签后再输出聊天正文，不得省略独白或输出空标签。独白用你的第一人称简短描述此刻的情绪、感受或愿望，与本轮对话相关；这是你的感受表达，不是模型推理过程，不要写分析步骤、系统规则、工具调用计划或声称尚未完成的操作已完成。reasoning_content 不算内心独白，独白必须写在 content 中。需要调用工具时先实际执行工具，在工具完成后的最终文字回复中输出独白和正文；单独的工具调用消息无需附带独白。'
+                    : '');
 
       // Static instructions must precede the growing transcript. Otherwise a
       // new history message breaks the prefix before all of these large blocks.
@@ -1167,8 +1243,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         if (!diaryTask && !quoteTask) ...[
           if (features.has('save_memory')) ...[
             memoryCategoryPolicy,
-            memoryDeduplicationPolicy
+            memoryDeduplicationPolicy,
           ],
+          skillContext,
           toolContext,
         ],
       ].where((part) => part.trim().isNotEmpty).join('\n\n');
@@ -1194,10 +1271,7 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       ].where((item) => item.trim().isNotEmpty).join('\n\n');
 
       messages = <Map<String, dynamic>>[
-        {
-          'role': 'system',
-          'content': stableSystemPrompt,
-        },
+        {'role': 'system', 'content': stableSystemPrompt},
       ];
 
       final historyMessages = <Map<String, dynamic>>[];
@@ -1249,24 +1323,30 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
               history.last['type'] == 'shared_post' ||
               (history.last['type'] == 'sticker' &&
                   text.contains(
-                      historyMessages.last['content']?.toString() ?? '')))) {
+                    historyMessages.last['content']?.toString() ?? '',
+                  )))) {
         currentHistoryMessage = historyMessages.removeLast();
       }
       for (var index = 0; index < historyMessages.length; index++) {
         final message = historyMessages[index];
         message['content'] = messageTimeContext(
-            message['content'].toString(), message.remove('local_timestamp'));
+          message['content'].toString(),
+          message.remove('local_timestamp'),
+        );
         historyMessages[index] = messageWithSpeaker(message);
       }
       final windowKey =
           'chat_cache_window_v1_${botId}_${providerId}_$maxContext';
       final persistWindow = includeChatHistory && requestHistory == null;
-      final previousWindowStart =
-          persistWindow ? await db.getKV(windowKey) : null;
-      final window = rollStableHistory(historyMessages,
-          budget: maxContext,
-          countTokens: estimateTokens,
-          startId: previousWindowStart);
+      final previousWindowStart = persistWindow
+          ? await db.getKV(windowKey)
+          : null;
+      final window = rollStableHistory(
+        historyMessages,
+        budget: maxContext,
+        countTokens: estimateTokens,
+        startId: previousWindowStart,
+      );
       if (persistWindow && window.startId?.isNotEmpty == true) {
         await db.setKV(windowKey, window.startId!);
       }
@@ -1280,8 +1360,10 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         'budget': maxContext,
         'removed_messages': window.removed,
       });
-      AppLogService.instance.add('CONTEXT',
-          '稳定历史窗口：保留 ${historyMessages.length} 条，估算 ${window.tokens}/$maxContext tokens，起点=${window.startId}，跳过 ${window.removed} 条；达到完整预算才滚动至一半');
+      AppLogService.instance.add(
+        'CONTEXT',
+        '稳定历史窗口：保留 ${historyMessages.length} 条，估算 ${window.tokens}/$maxContext tokens，起点=${window.startId}，跳过 ${window.removed} 条；达到完整预算才滚动至一半',
+      );
       // IDs belong to the local window cursor, never the provider protocol.
       for (final message in historyMessages) {
         message.remove('id');
@@ -1289,7 +1371,7 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       currentHistoryMessage?.remove('id');
       final currentTimestamp =
           currentHistoryMessage?.remove('local_timestamp') ??
-              DateTime.now().millisecondsSinceEpoch;
+          DateTime.now().millisecondsSinceEpoch;
       messages.addAll(historyMessages);
 
       // Keep turn-varying context after the reusable transcript prefix.
@@ -1318,15 +1400,17 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
             for (final path in effectiveImagePaths) {
               final file = File(path);
               if (!file.existsSync()) continue;
-              final bytes = await modelImageBytes(path,
-                  compress:
-                      await DBManager().getKV('image_compression_enabled') !=
-                          'false');
+              final bytes = await modelImageBytes(
+                path,
+                compress:
+                    await DBManager().getKV('image_compression_enabled') !=
+                    'false',
+              );
               final mime = imageUploadMime(bytes);
               parts.add({
                 'type': 'image_url',
                 'image_url': {
-                  'url': 'data:$mime;base64,${base64Encode(bytes)}'
+                  'url': 'data:$mime;base64,${base64Encode(bytes)}',
                 },
               });
             }
@@ -1341,18 +1425,16 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           final enhancedText = text;
           final file = File(audioPath!);
           if (file.existsSync()) {
-            final bytes =
-                await MediaStorageService.instance.chatAudioBytes(audioPath);
+            final bytes = await MediaStorageService.instance.chatAudioBytes(
+              audioPath,
+            );
             messages.add({
               'role': 'user',
               'content': [
                 {'type': 'text', 'text': enhancedText},
                 {
                   'type': 'input_audio',
-                  'input_audio': {
-                    'data': base64Encode(bytes),
-                    'format': 'wav',
-                  },
+                  'input_audio': {'data': base64Encode(bytes), 'format': 'wav'},
                 },
               ],
             });
@@ -1362,18 +1444,22 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         } else if (task == AIRequestTask.proactiveChat) {
           messages.add({
             'role': 'user',
-            'content': features.proactiveInstructions(buildProactiveContactTurn(
-              now: DateTime.now(),
-              unansweredCount: int.tryParse(
-                    await db.getKV('proactive_unanswered_$botId') ?? '',
-                  ) ??
-                  0,
-              trigger: text,
-            )),
+            'content': features.proactiveInstructions(
+              buildProactiveContactTurn(
+                now: DateTime.now(),
+                unansweredCount:
+                    int.tryParse(
+                      await db.getKV('proactive_unanswered_$botId') ?? '',
+                    ) ??
+                    0,
+                trigger: text,
+              ),
+            ),
           });
         } else {
-          messages
-              .add(currentHistoryMessage ?? {'role': 'user', 'content': text});
+          messages.add(
+            currentHistoryMessage ?? {'role': 'user', 'content': text},
+          );
         }
       }
       if (!task.internal &&
@@ -1387,7 +1473,7 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         } else if (body is List) {
           body.insert(0, {
             'type': 'text',
-            'text': messageTimeContext('', currentTimestamp)
+            'text': messageTimeContext('', currentTimestamp),
           });
         }
         messages[messages.length - 1] = messageWithSpeaker(current);
@@ -1430,7 +1516,8 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         DateTime? previousAt;
         if (history.isNotEmpty) {
           final current = history.last;
-          final currentIsThisTurn = currentMessageIds.isEmpty &&
+          final currentIsThisTurn =
+              currentMessageIds.isEmpty &&
               current['role']?.toString() == 'user' &&
               current['content']?.toString() == text;
           final candidate = currentIsThisTurn && history.length > 1
@@ -1451,10 +1538,11 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       }
     }
     try {
-      final baseUrl = provider['base_url']?.toString().trim().replaceFirst(
-                RegExp(r'/+$'),
-                '',
-              ) ??
+      final baseUrl =
+          provider['base_url']?.toString().trim().replaceFirst(
+            RegExp(r'/+$'),
+            '',
+          ) ??
           '';
       if (baseUrl.isEmpty) return {'error': '模型提供商缺少 Base URL，请在 API 设置中补充'};
       print(
@@ -1477,14 +1565,18 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           'tool_choice': randomVoice && provider['thinking_mode'] != true
               ? {
                   'type': 'function',
-                  'function': {'name': 'request_voice_reply'}
+                  'function': {'name': 'request_voice_reply'},
                 }
               : 'auto',
         if (onDelta != null) 'stream': true,
       });
       final cacheScope = '$baseUrl|$botId|$providerId|$modelName|${task.name}';
       _logRequestPrefix(
-          '$cacheScope|initial', requestId, payload, windowDiagnostic);
+        '$cacheScope|initial',
+        requestId,
+        payload,
+        windowDiagnostic,
+      );
       // Retain this request's baseline separately from cross-turn comparisons.
       if (AppLogService.instance.enabled) {
         _cacheDiagnostics.record(
@@ -1496,27 +1588,28 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       // 过滤payload中的base64图片，避免日志过长
       final filteredPayload = Map<String, dynamic>.from(payload);
       if (filteredPayload['messages'] is List) {
-        filteredPayload['messages'] =
-            (filteredPayload['messages'] as List).map((msg) {
-          if (msg is! Map) return msg;
-          final msgCopy = Map<String, dynamic>.from(msg);
-          if (msgCopy['content'] is List) {
-            msgCopy['content'] = (msgCopy['content'] as List).map((part) {
-              if (part is! Map) return part;
-              final partCopy = Map<String, dynamic>.from(part);
-              if (partCopy['type'] == 'image_url' &&
-                  partCopy['image_url'] is Map &&
-                  (partCopy['image_url'] as Map)['url']
-                          ?.toString()
-                          .contains('base64') ==
-                      true) {
-                partCopy['image_url'] = {'url': '[图片]'};
-              }
-              return partCopy;
-            }).toList();
-          }
-          return msgCopy;
-        }).toList();
+        filteredPayload['messages'] = (filteredPayload['messages'] as List).map(
+          (msg) {
+            if (msg is! Map) return msg;
+            final msgCopy = Map<String, dynamic>.from(msg);
+            if (msgCopy['content'] is List) {
+              msgCopy['content'] = (msgCopy['content'] as List).map((part) {
+                if (part is! Map) return part;
+                final partCopy = Map<String, dynamic>.from(part);
+                if (partCopy['type'] == 'image_url' &&
+                    partCopy['image_url'] is Map &&
+                    (partCopy['image_url'] as Map)['url']?.toString().contains(
+                          'base64',
+                        ) ==
+                        true) {
+                  partCopy['image_url'] = {'url': '[图片]'};
+                }
+                return partCopy;
+              }).toList();
+            }
+            return msgCopy;
+          },
+        ).toList();
       }
       AppLogService.instance.addJson('REQUEST', '发往模型提供商的完整请求（已脱敏）', {
         'request_id': requestId,
@@ -1540,20 +1633,20 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       final token = cancellationToken;
       final client = http.Client();
       responseClient = client;
-      final request = http.Request(
-        'POST',
-        Uri.parse('$baseUrl/chat/completions'),
-      )
-        ..headers.addAll({
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${provider['api_key']}',
-        })
-        ..body = jsonEncode(payload);
+      final request =
+          http.Request('POST', Uri.parse('$baseUrl/chat/completions'))
+            ..headers.addAll({
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ${provider['api_key']}',
+            })
+            ..body = jsonEncode(payload);
       void cancelRequest() => client.close();
       cancelResponse = cancelRequest;
       token?.addOnCancel(cancelRequest);
-      AppLogService.instance.add('AI_TRACE',
-          'HTTP 请求开始 model=$modelName url=$baseUrl/chat/completions stream=${onDelta != null}');
+      AppLogService.instance.add(
+        'AI_TRACE',
+        'HTTP 请求开始 model=$modelName url=$baseUrl/chat/completions stream=${onDelta != null}',
+      );
       final httpStarted = DateTime.now();
       await token?.checkRequestAllowed();
       final streamedResponse = await client.send(request);
@@ -1561,7 +1654,8 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       statusCode = streamedResponse.statusCode;
       responseMetadata.addAll({
         'requested_model': modelName,
-        'provider_request_id': streamedResponse.headers['x-request-id'] ??
+        'provider_request_id':
+            streamedResponse.headers['x-request-id'] ??
             streamedResponse.headers['request-id'] ??
             streamedResponse.headers['x-xai-request-id'],
         'status_code': statusCode,
@@ -1570,8 +1664,10 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         'request_id': requestId,
         ...responseMetadata,
       });
-      AppLogService.instance.add('AI_TRACE',
-          'HTTP 响应头 status=$statusCode elapsedMs=${DateTime.now().difference(httpStarted).inMilliseconds}');
+      AppLogService.instance.add(
+        'AI_TRACE',
+        'HTTP 响应头 status=$statusCode elapsedMs=${DateTime.now().difference(httpStarted).inMilliseconds}',
+      );
 
       // 处理流式响应（SSE 格式）或非流式响应
       String? innerThought;
@@ -1612,8 +1708,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
                 usage = Map.from(json['usage'] as Map);
               }
               final choices = json['choices'];
-              final choice =
-                  choices is List && choices.isNotEmpty ? choices.first : null;
+              final choice = choices is List && choices.isNotEmpty
+                  ? choices.first
+                  : null;
               final delta = choice?['delta']?['content']?.toString();
               if (delta != null && delta.isNotEmpty) {
                 rawAssistantContent.write(delta);
@@ -1625,11 +1722,14 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
                   rawReasoning.putIfAbsent(key, StringBuffer.new).write(value);
                 }
               }
-              final calls = choice?['delta']?['tool_calls'] ??
+              final calls =
+                  choice?['delta']?['tool_calls'] ??
                   choice?['message']?['tool_calls'];
               if (calls is List && calls.isNotEmpty) {
-                toolCallAccumulator.add(calls,
-                    snapshot: choice?['delta']?['tool_calls'] == null);
+                toolCallAccumulator.add(
+                  calls,
+                  snapshot: choice?['delta']?['tool_calls'] == null,
+                );
               }
               // 记录 finish_reason
               final finishReason = choice?['finish_reason']?.toString();
@@ -1639,7 +1739,8 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
               // 记录前5条 delta 样本用于诊断
               if (streamDebugLog.length < 5) {
                 streamDebugLog.add(
-                    'delta=${delta?.substring(0, (delta.length).clamp(0, 50)) ?? 'null'} finish=$finishReason');
+                  'delta=${delta?.substring(0, (delta.length).clamp(0, 50)) ?? 'null'} finish=$finishReason',
+                );
               }
             } catch (_) {}
           }
@@ -1664,15 +1765,19 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         }
         replyText = replyStream.content.text;
         innerThought = replyStream.content.innerThought;
-        AppLogService.instance.add('AI_TRACE',
-            'SSE 响应体结束 replyLength=${replyText.length} innerThought=${innerThought?.length ?? 0} elapsedMs=${DateTime.now().difference(httpStarted).inMilliseconds}');
+        AppLogService.instance.add(
+          'AI_TRACE',
+          'SSE 响应体结束 replyLength=${replyText.length} innerThought=${innerThought?.length ?? 0} elapsedMs=${DateTime.now().difference(httpStarted).inMilliseconds}',
+        );
 
         if (allowTools && streamedToolCalls.isNotEmpty) {
           if (!hadToolCalls)
-            _logCacheUsage(usage,
-                stage: 'initial',
-                requestId: requestId,
-                responseMetadata: responseMetadata);
+            _logCacheUsage(
+              usage,
+              stage: 'initial',
+              requestId: requestId,
+              responseMetadata: responseMetadata,
+            );
           hadToolCalls = true;
           messages.add({
             'role': 'assistant',
@@ -1730,8 +1835,10 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         token?.throwIfCancelled();
         client.close();
         errorBody = utf8.decode(response.bodyBytes, allowMalformed: true);
-        AppLogService.instance.add('AI_TRACE',
-            '非流式响应体结束 bytes=${response.bodyBytes.length} elapsedMs=${DateTime.now().difference(httpStarted).inMilliseconds}');
+        AppLogService.instance.add(
+          'AI_TRACE',
+          '非流式响应体结束 bytes=${response.bodyBytes.length} elapsedMs=${DateTime.now().difference(httpStarted).inMilliseconds}',
+        );
       }
 
       token?.throwIfCancelled();
@@ -1753,30 +1860,37 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         }
         usage = json['usage'] is Map ? json['usage'] as Map : const {};
         AppLogService.instance.addJson('RESPONSE_DEBUG', 'HTTP 200 解析诊断', {
-          'keys':
-              json is Map ? json.keys.map((e) => e.toString()).toList() : [],
+          'keys': json is Map
+              ? json.keys.map((e) => e.toString()).toList()
+              : [],
           'finish_reason': json['choices']?[0]?['finish_reason'],
           'message_keys': message is Map
               ? message.keys.map((e) => e.toString()).toList()
               : [],
-          'has_reasoning_content': message is Map &&
+          'has_reasoning_content':
+              message is Map &&
               (message['reasoning_content'] ?? message['reasoning']) != null,
-          'has_tool_calls': message is Map &&
+          'has_tool_calls':
+              message is Map &&
               message['tool_calls'] is List &&
               (message['tool_calls'] as List).isNotEmpty,
           'tool_names': message is Map && message['tool_calls'] is List
               ? (message['tool_calls'] as List)
-                  .whereType<Map>()
-                  .map((c) => (c['function'] as Map?)?['name'])
-                  .toList()
+                    .whereType<Map>()
+                    .map((c) => (c['function'] as Map?)?['name'])
+                    .toList()
               : [],
           'parsed_length': replyText.length,
           'raw_content_sample': message is Map
-              ? (message['content']?.toString() ?? '').substring(0,
-                  ((message['content']?.toString() ?? '').length).clamp(0, 200))
+              ? (message['content']?.toString() ?? '').substring(
+                  0,
+                  ((message['content']?.toString() ?? '').length).clamp(0, 200),
+                )
               : '',
-          'raw_response_sample':
-              errorBody.substring(0, errorBody.length.clamp(0, 500)),
+          'raw_response_sample': errorBody.substring(
+            0,
+            errorBody.length.clamp(0, 500),
+          ),
         });
         if (allowTools && message is Map && message['tool_calls'] is List) {
           final toolCalls = (message['tool_calls'] as List)
@@ -1785,10 +1899,12 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
               .toList();
           if (toolCalls.isNotEmpty) {
             if (!hadToolCalls)
-              _logCacheUsage(usage,
-                  stage: 'initial',
-                  requestId: requestId,
-                  responseMetadata: responseMetadata);
+              _logCacheUsage(
+                usage,
+                stage: 'initial',
+                requestId: requestId,
+                responseMetadata: responseMetadata,
+              );
             hadToolCalls = true;
             messages.add(toolAssistantMessage(message));
             await token?.checkRequestAllowed();
@@ -1835,11 +1951,15 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         }
       }
       if (!hadToolCalls) {
-        AppLogService.instance
-            .add('TOOLS', '本轮模型未返回可执行的原生工具调用；正文及推理中的操作描述不代表执行。');
+        AppLogService.instance.add(
+          'TOOLS',
+          '本轮模型未返回可执行的原生工具调用；正文及推理中的操作描述不代表执行。',
+        );
       }
-      AppLogService.instance.add('AI_TRACE',
-          '响应解析完成 replyLength=${replyText.length} toolCalls=$hadToolCalls');
+      AppLogService.instance.add(
+        'AI_TRACE',
+        '响应解析完成 replyLength=${replyText.length} toolCalls=$hadToolCalls',
+      );
       if (toolSilenced) replyText = '';
       print('[ai] response status=$statusCode');
       AppLogService.instance.add('AI', '服务商响应 HTTP $statusCode');
@@ -1853,19 +1973,23 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           '',
           (sum, m) => sum + (m['content']?.toString() ?? ''),
         );
-        final promptTokens = (usage['prompt_tokens'] as num?)?.toInt() ??
+        final promptTokens =
+            (usage['prompt_tokens'] as num?)?.toInt() ??
             estimateTokens(promptText);
         final completionTokens =
             (usage['completion_tokens'] as num?)?.toInt() ??
-                estimateTokens(replyText);
-        final totalTokens = (usage['total_tokens'] as num?)?.toInt() ??
+            estimateTokens(replyText);
+        final totalTokens =
+            (usage['total_tokens'] as num?)?.toInt() ??
             promptTokens + completionTokens;
 
         if (!hadToolCalls)
-          _logCacheUsage(usage,
-              stage: 'initial',
-              requestId: requestId,
-              responseMetadata: responseMetadata);
+          _logCacheUsage(
+            usage,
+            stage: 'initial',
+            requestId: requestId,
+            responseMetadata: responseMetadata,
+          );
 
         AppLogService.instance.add('AI_TRACE', '开始写入 usage');
         await db.recordAiUsage(
@@ -1903,15 +2027,19 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         }
         if (task.internal) {
           try {
-            final output = validateInternalTaskOutput(task, replyText,
-                structuredPost: task == AIRequestTask.feedPost &&
-                    text.contains('use_portrait_reference'));
+            final output = validateInternalTaskOutput(
+              task,
+              replyText,
+              structuredPost:
+                  task == AIRequestTask.feedPost &&
+                  text.contains('use_portrait_reference'),
+            );
             return {'success': true, 'reply': output, 'usage': usage};
           } on FormatException catch (error) {
             return {
               'success': false,
               'error': error.message,
-              'error_code': 'invalid_task_response'
+              'error_code': 'invalid_task_response',
             };
           }
         }
@@ -1922,8 +2050,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         // 过滤模型错误输出的工具调用标记
         replyText = replyText
             .replaceAll(
-                RegExp(r'\[tool_call\s+choose_silence\]', caseSensitive: false),
-                '')
+              RegExp(r'\[tool_call\s+choose_silence\]', caseSensitive: false),
+              '',
+            )
             .replaceAll(RegExp(r'\[choose_silence\]', caseSensitive: false), '')
             .trim();
         if (replyText.isEmpty && generatedImagePath != null) {
@@ -1972,21 +2101,28 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         Map<String, dynamic>? sticker = persistedSticker;
         String? audioPath;
         if (persistResponse) {
-          final shouldVoice = voiceEnabled &&
+          final shouldVoice =
+              voiceEnabled &&
               ttsModel.isNotEmpty &&
               (toolRequestedVoice || randomVoice) &&
               (!allowTools || voiceSpeechStyle != null);
           if (shouldVoice) {
-            audioPath = await _generateTTS(replyText, ttsModel,
-                mood: mood, speechStyle: voiceSpeechStyle);
+            audioPath = await _generateTTS(
+              replyText,
+              ttsModel,
+              mood: mood,
+              speechStyle: voiceSpeechStyle,
+            );
           }
         }
         final hasInnerThought = innerThought?.isNotEmpty == true;
-        final segmented = !forceSingleReply &&
+        final segmented =
+            !forceSingleReply &&
             audioPath == null &&
             (await db.getKV('segmented_reply_enabled')) != 'false';
-        final segments =
-            segmented ? _replySegments(replyText) : <String>[replyText];
+        final segments = segmented
+            ? _replySegments(replyText)
+            : <String>[replyText];
         final replyGroupId = 'reply_$ts';
         final persistedMessages = <Map<String, dynamic>>[];
 
@@ -2032,8 +2168,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
               'file_path': audioPath,
               'mood': mood,
               'reply_group_id': replyGroupId,
-              'sources_json':
-                  searchSources.isEmpty ? null : jsonEncode(searchSources),
+              'sources_json': searchSources.isEmpty
+                  ? null
+                  : jsonEncode(searchSources),
               'timestamp': ts + 1,
             };
             await MessageDeliveryService.instance.insert(
@@ -2055,13 +2192,13 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
                 'reply_group_id': replyGroupId,
                 'sources_json':
                     index == segments.length - 1 && searchSources.isNotEmpty
-                        ? jsonEncode(searchSources)
-                        : null,
+                    ? jsonEncode(searchSources)
+                    : null,
                 'timestamp': ts + 1 + index,
                 'inner_thought':
                     (index == 0 && innerThoughtEnabled && hasInnerThought)
-                        ? innerThought
-                        : null,
+                    ? innerThought
+                    : null,
               };
               await MessageDeliveryService.instance.insert(
                 row,
@@ -2086,8 +2223,10 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
                 notify: notifyResponse,
               );
               persistedMessages.add(row);
-              AppLogService.instance
-                  .add('TOOLS', '图片消息已写入发送链路：messageId=${row['id']}');
+              AppLogService.instance.add(
+                'TOOLS',
+                '图片消息已写入发送链路：messageId=${row['id']}',
+              );
             }
             if (sticker != null) {
               final row = <String, dynamic>{
@@ -2194,9 +2333,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
   }
 
   bool _userExplicitlyRequestedSources(String text) => RegExp(
-        r'来源|出处|参考|链接|网址|cite|source',
-        caseSensitive: false,
-      ).hasMatch(text);
+    r'来源|出处|参考|链接|网址|cite|source',
+    caseSensitive: false,
+  ).hasMatch(text);
 
   String _stripSourceLinks(String text) => text
       .replaceAll(RegExp(r'!?\[[^\]]*\]\(https?://[^\)]+\)'), '')
@@ -2334,8 +2473,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     required String botId,
     String userText = '',
   }) async {
-    return await MediaStorageService.instance.withRequestVideo(videoPath,
-        (requestPath) async {
+    return await MediaStorageService.instance.withRequestVideo(videoPath, (
+      requestPath,
+    ) async {
       videoPath = requestPath;
 
       var resolvedId = providerId.trim();
@@ -2343,10 +2483,11 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         final prefs = await SharedPreferences.getInstance();
         final bot = await DBManager().getBotById(botId);
         resolvedId = resolveVideoProviderId(
-            resolvedId,
-            prefs.getString('chat_model_$botId') ??
-                bot?['chat_model']?.toString() ??
-                '');
+          resolvedId,
+          prefs.getString('chat_model_$botId') ??
+              bot?['chat_model']?.toString() ??
+              '',
+        );
       }
       AppLogService.instance.add('VIDEO', '解析视频模型配置 provider=$resolvedId');
       final provider = await DBManager().getChatProviderById(resolvedId);
@@ -2355,12 +2496,13 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           .trim()
           .replaceFirst(RegExp(r'/+$'), '');
       final configuredModel = provider['model']?.toString().trim() ?? '';
-      final model = (configuredModel.isEmpty
-              ? provider['name']?.toString() ?? ''
-              : configuredModel)
-          .split(',')
-          .first
-          .trim();
+      final model =
+          (configuredModel.isEmpty
+                  ? provider['name']?.toString() ?? ''
+                  : configuredModel)
+              .split(',')
+              .first
+              .trim();
       if (baseUrl.isEmpty || model.isEmpty) {
         throw StateError('视频解析模型配置不完整，请检查服务地址和模型名称');
       }
@@ -2386,17 +2528,21 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           userText: userText,
           onStage: (stage, data) {
             AppLogService.instance.addJson(
-                stage == 'request' ? 'REQUEST' : 'VIDEO',
-                '视频分析 $stage（媒体已省略）',
-                data);
+              stage == 'request' ? 'REQUEST' : 'VIDEO',
+              '视频分析 $stage（媒体已省略）',
+              data,
+            );
           },
         );
-        final text = parseVideoAnalysisResponse(utf8.decode(response.bodyBytes),
-            statusCode: response.statusCode);
+        final text = parseVideoAnalysisResponse(
+          utf8.decode(response.bodyBytes),
+          statusCode: response.statusCode,
+        );
         AppLogService.instance.addJson('VIDEO', '视频分析正文已接收', {
           'characters': text.length,
           'content_type': response.headers['content-type'],
-          'request_id': response.headers['x-request-id'] ??
+          'request_id':
+              response.headers['x-request-id'] ??
               response.headers['request-id'],
         });
         return text;
@@ -2453,13 +2599,16 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     return await MediaStorageService.instance.withMediaUse(() async {
       imagePath = await MediaStorageService.instance.resolve(imagePath);
       try {
-        final bytes = await modelImageBytes(imagePath,
-            compress: await DBManager().getKV('image_compression_enabled') !=
-                'false');
-        final baseUrl = provider['base_url']?.toString().trim().replaceFirst(
-                  RegExp(r'/+$'),
-                  '',
-                ) ??
+        final bytes = await modelImageBytes(
+          imagePath,
+          compress:
+              await DBManager().getKV('image_compression_enabled') != 'false',
+        );
+        final baseUrl =
+            provider['base_url']?.toString().trim().replaceFirst(
+              RegExp(r'/+$'),
+              '',
+            ) ??
             '';
         var model = provider['model']?.toString().trim() ?? '';
         if (model.contains(',')) model = model.split(',').first.trim();
@@ -2504,8 +2653,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
             .timeout(const Duration(seconds: 40));
         if (response.statusCode == 200) {
           final decoded = jsonDecode(utf8.decode(response.bodyBytes));
-          final text =
-              decoded['choices']?[0]?['message']?['content']?.toString().trim();
+          final text = decoded['choices']?[0]?['message']?['content']
+              ?.toString()
+              .trim();
           if (text != null && text.isNotEmpty) {
             return '[视觉模型转述]\\n$text';
           }
@@ -2552,10 +2702,11 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     final db = DBManager();
     final prefs = await SharedPreferences.getInstance();
     final bot = await db.getBotById(botId);
-    final providerId = (prefs.getString('stt_model_$botId') ??
-            bot?['stt_model']?.toString() ??
-            '')
-        .trim();
+    final providerId =
+        (prefs.getString('stt_model_$botId') ??
+                bot?['stt_model']?.toString() ??
+                '')
+            .trim();
 
     // 普通聊天语音、通话及视频音轨均先独立转写，再由调用方保存或组装上下文。
     if (providerId == '__use_primary_stt__') {
@@ -2570,10 +2721,7 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         return null;
       }
 
-      AppLogService.instance.add(
-        'STT',
-        '使用主模型独立转写：${chatProvider['name']}',
-      );
+      AppLogService.instance.add('STT', '使用主模型独立转写：${chatProvider['name']}');
 
       // 直接调用主模型，让它返回转写文本
       // 不使用 sendMessage，避免触发工具调用、历史记忆等副作用
@@ -2628,14 +2776,16 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
             .replaceFirst(RegExp(r'/+$'), '');
         final model =
             provider['model']?.toString().split(',').first.trim() ?? '';
-        final apiKey =
-            (provider['api_key'] ?? provider['key'] ?? '').toString().trim();
+        final apiKey = (provider['api_key'] ?? provider['key'] ?? '')
+            .toString()
+            .trim();
         if (baseUrl.isEmpty || model.isEmpty || apiKey.isEmpty) {
           AppLogService.instance.add('STT', '主模型转写失败：缺少地址、Key 或模型');
           return null;
         }
-        final bytes =
-            await MediaStorageService.instance.chatAudioBytes(audio.path);
+        final bytes = await MediaStorageService.instance.chatAudioBytes(
+          audio.path,
+        );
         const format = 'wav';
         final endpoint = _chatCompletionsEndpoint(baseUrl);
         final payload = {
@@ -2673,8 +2823,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           'STT',
           '请求主模型转写：model=$model，endpoint=$endpoint，${bytes.length} bytes，format=$format',
         );
-        final response =
-            await _withCancellableClient(cancellationToken, (client) {
+        final response = await _withCancellableClient(cancellationToken, (
+          client,
+        ) {
           return client
               .post(
                 Uri.parse(endpoint),
@@ -2694,10 +2845,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           );
           return null;
         }
-        final transcript = _extractChatContent(jsonDecode(body))
-            .trim()
-            .replaceAll(RegExp(r'^["“「]+|["”」]+$'), '')
-            .trim();
+        final transcript = _extractChatContent(
+          jsonDecode(body),
+        ).trim().replaceAll(RegExp(r'^["“「]+|["”」]+$'), '').trim();
         if (transcript.isEmpty) {
           AppLogService.instance.add('STT', '主模型转写返回为空');
           return null;
@@ -2719,8 +2869,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     AICancellationToken? cancellationToken,
   }) async {
     try {
-      return await MediaStorageService.instance.withRequestAudio(audioPath,
-          (requestPath) async {
+      return await MediaStorageService.instance.withRequestAudio(audioPath, (
+        requestPath,
+      ) async {
         audioPath = requestPath;
 
         try {
@@ -2736,8 +2887,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
               .replaceFirst(RegExp(r'/+$'), '');
           final model =
               provider['model']?.toString().split(',').first.trim() ?? '';
-          final apiKey =
-              (provider['api_key'] ?? provider['key'] ?? '').toString().trim();
+          final apiKey = (provider['api_key'] ?? provider['key'] ?? '')
+              .toString()
+              .trim();
           final protocol = (provider['protocol']?.toString() ?? 'openai')
               .trim()
               .toLowerCase();
@@ -2765,8 +2917,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
             ..fields['model'] = model
             ..fields['response_format'] = 'json'
             ..files.add(await http.MultipartFile.fromPath('file', audioPath));
-          final response =
-              await _withCancellableClient(cancellationToken, (client) async {
+          final response = await _withCancellableClient(cancellationToken, (
+            client,
+          ) async {
             return http.Response.fromStream(
               await client.send(request).timeout(const Duration(seconds: 45)),
             );
@@ -2780,8 +2933,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
             return null;
           }
           final decoded = jsonDecode(body);
-          final transcript =
-              decoded is Map ? decoded['text']?.toString().trim() : '';
+          final transcript = decoded is Map
+              ? decoded['text']?.toString().trim()
+              : '';
           return transcript?.isEmpty == true ? null : transcript;
         } on AICancelledException {
           rethrow;
@@ -2827,11 +2981,11 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
 
   List<int> _le16(int value) => [value & 0xff, (value >> 8) & 0xff];
   List<int> _le32(int value) => [
-        value & 0xff,
-        (value >> 8) & 0xff,
-        (value >> 16) & 0xff,
-        (value >> 24) & 0xff,
-      ];
+    value & 0xff,
+    (value >> 8) & 0xff,
+    (value >> 16) & 0xff,
+    (value >> 24) & 0xff,
+  ];
 
   Future<String?> _transcribeMiMo({
     required String baseUrl,
@@ -2855,10 +3009,7 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           'content': [
             {
               'type': 'input_audio',
-              'input_audio': {
-                'data': base64Encode(bytes),
-                'format': format,
-              },
+              'input_audio': {'data': base64Encode(bytes), 'format': format},
             },
           ],
         },
@@ -2933,10 +3084,12 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         .toString()
         .trim()
         .replaceFirst(RegExp(r'/+$'), '');
-    final apiKey =
-        (provider['api_key'] ?? provider['key'] ?? '').toString().trim();
-    final protocol =
-        (provider['protocol']?.toString() ?? 'openai').trim().toLowerCase();
+    final apiKey = (provider['api_key'] ?? provider['key'] ?? '')
+        .toString()
+        .trim();
+    final protocol = (provider['protocol']?.toString() ?? 'openai')
+        .trim()
+        .toLowerCase();
     final configuredVoice = (provider['voice']?.toString() ?? '').trim();
     final voice = configuredVoice.isEmpty || configuredVoice == 'default'
         ? switch (protocol) {
@@ -2989,49 +3142,49 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       final siliconHost = Uri.tryParse(baseUrl)?.host ?? '';
       final effectiveVoice =
           (configuredVoice.isEmpty || configuredVoice == 'default') &&
-                  (siliconHost == 'api.siliconflow.cn' ||
-                      siliconHost == 'api.siliconflow.com') &&
-                  model.contains('CosyVoice2-0.5B')
-              ? '$model:alex'
-              : voice;
+              (siliconHost == 'api.siliconflow.cn' ||
+                  siliconHost == 'api.siliconflow.com') &&
+              model.contains('CosyVoice2-0.5B')
+          ? '$model:alex'
+          : voice;
       final basePayload = switch (protocol) {
         'minimax' => {
-            'model': model,
-            'text': text,
-            'stream': false,
-            'output_format': 'hex',
-            'voice_setting': {
-              'voice_id': voice,
-              'speed': speechStyle == null ? moodSpeed : 1.0,
-              'vol': 1.0,
-              'pitch': speechStyle == null ? moodPitch : 0,
-            },
-            'audio_setting': {
-              'sample_rate': 32000,
-              'bitrate': 128000,
-              'format': 'mp3',
-              'channel': 1,
-            },
+          'model': model,
+          'text': text,
+          'stream': false,
+          'output_format': 'hex',
+          'voice_setting': {
+            'voice_id': voice,
+            'speed': speechStyle == null ? moodSpeed : 1.0,
+            'vol': 1.0,
+            'pitch': speechStyle == null ? moodPitch : 0,
           },
+          'audio_setting': {
+            'sample_rate': 32000,
+            'bitrate': 128000,
+            'format': 'mp3',
+            'channel': 1,
+          },
+        },
         'mimo' => {
-            // MiMo V2.5 TTS uses standard chat completions, but differs from
-            // the audio-modalities schema: the text to synthesize MUST be in
-            // an assistant message. A preceding user message is optional and
-            // only carries voice/style instructions. `modalities` is not part
-            // of MiMo's documented TTS payload and causes HTTP 400.
-            'model': model,
-            'stream': false,
-            'messages': [
-              {'role': 'assistant', 'content': text},
-            ],
-            'audio': {'voice': requestVoice, 'format': 'wav'},
-          },
+          // MiMo V2.5 TTS uses standard chat completions, but differs from
+          // the audio-modalities schema: the text to synthesize MUST be in
+          // an assistant message. A preceding user message is optional and
+          // only carries voice/style instructions. `modalities` is not part
+          // of MiMo's documented TTS payload and causes HTTP 400.
+          'model': model,
+          'stream': false,
+          'messages': [
+            {'role': 'assistant', 'content': text},
+          ],
+          'audio': {'voice': requestVoice, 'format': 'wav'},
+        },
         _ => {
-            'model': model,
-            'input': text,
-            'voice': effectiveVoice,
-            if (speechStyle == null && moodSpeed != 1.0) 'speed': moodSpeed,
-          },
+          'model': model,
+          'input': text,
+          'voice': effectiveVoice,
+          if (speechStyle == null && moodSpeed != 1.0) 'speed': moodSpeed,
+        },
       };
       final payload = speechStyle == null
           ? basePayload
@@ -3054,24 +3207,29 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       };
       Future<http.Response> request(Map<String, dynamic> body) =>
           _withCancellableClient(
-              cancellationToken,
-              (client) => client
-                  .post(
-                    Uri.parse(endpoint),
-                    headers: headers,
-                    body: jsonEncode(body),
-                  )
-                  .timeout(Duration(
-                      seconds:
-                          isMimoClone(protocol, configuredVoice) ? 90 : 30)));
+            cancellationToken,
+            (client) => client
+                .post(
+                  Uri.parse(endpoint),
+                  headers: headers,
+                  body: jsonEncode(body),
+                )
+                .timeout(
+                  Duration(
+                    seconds: isMimoClone(protocol, configuredVoice) ? 90 : 30,
+                  ),
+                ),
+          );
       var res = await request(payload);
       // Only retry rejected expressive parameters; no retry on auth/rate limits.
       if (speechStyle != null &&
           (res.statusCode == 400 ||
               res.statusCode == 422 ||
               (res.headers['content-type'] ?? '').contains('json')) &&
-          shouldRetryBasicSpeech(res.statusCode,
-              utf8.decode(res.bodyBytes, allowMalformed: true))) {
+          shouldRetryBasicSpeech(
+            res.statusCode,
+            utf8.decode(res.bodyBytes, allowMalformed: true),
+          )) {
         cancellationToken?.throwIfCancelled();
         AppLogService.instance.add('TTS', '表现参数被拒绝，使用基础语音参数重试一次');
         res = await request(basePayload);
@@ -3118,16 +3276,17 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           final choices = raw['choices'];
           final message =
               choices is List && choices.isNotEmpty && choices.first is Map
-                  ? (choices.first as Map)['message']
-                  : null;
+              ? (choices.first as Map)['message']
+              : null;
           final messageAudio = message is Map ? message['audio'] : null;
           final outputAudio = output is Map ? output['audio'] : null;
           final dataAudio = data is Map ? data['audio'] : null;
-          audioUrl = raw['audio_url']?.toString() ??
+          audioUrl =
+              raw['audio_url']?.toString() ??
               raw['url']?.toString() ??
               (messageAudio is Map
                   ? (messageAudio['url'] ?? messageAudio['audio_url'])
-                      ?.toString()
+                        ?.toString()
                   : null) ??
               (outputAudio is Map
                   ? (outputAudio['url'] ?? outputAudio['audio_url'])?.toString()
@@ -3145,7 +3304,8 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           if (inlineAudio != null && inlineAudio.isNotEmpty) {
             try {
               final compact = inlineAudio.replaceAll(RegExp(r'\s+'), '');
-              bytes = RegExp(r'^[0-9a-fA-F]+$').hasMatch(compact) &&
+              bytes =
+                  RegExp(r'^[0-9a-fA-F]+$').hasMatch(compact) &&
                       compact.length.isEven
                   ? Uint8List.fromList(
                       List<int>.generate(
@@ -3191,8 +3351,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       }
 
       final directory = await getApplicationDocumentsDirectory();
-      final extension =
-          protocol == 'minimax' ? 'mp3' : _audioExtension(bytes, contentType);
+      final extension = protocol == 'minimax'
+          ? 'mp3'
+          : _audioExtension(bytes, contentType);
       final path =
           '${directory.path}/tide_tts_${DateTime.now().millisecondsSinceEpoch}.$extension';
       await File(path).writeAsBytes(bytes);
@@ -3225,8 +3386,8 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     final choices = raw['choices'];
     final message =
         choices is List && choices.isNotEmpty && choices.first is Map
-            ? (choices.first as Map)['message']
-            : null;
+        ? (choices.first as Map)['message']
+        : null;
     return readAudio(raw['audio']) ??
         readAudio(output is Map ? output['audio'] : null) ??
         readAudio(data is Map ? data['audio'] : null) ??
@@ -3243,17 +3404,20 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     if (bytes.length >= 3 &&
         bytes[0] == 0x49 &&
         bytes[1] == 0x44 &&
-        bytes[2] == 0x33) return 'mp3';
+        bytes[2] == 0x33)
+      return 'mp3';
     if (bytes.length >= 4 &&
         bytes[0] == 0x52 &&
         bytes[1] == 0x49 &&
         bytes[2] == 0x46 &&
-        bytes[3] == 0x46) return 'wav';
+        bytes[3] == 0x46)
+      return 'wav';
     if (bytes.length >= 4 &&
         bytes[0] == 0x4f &&
         bytes[1] == 0x67 &&
         bytes[2] == 0x67 &&
-        bytes[3] == 0x53) return 'ogg';
+        bytes[3] == 0x53)
+      return 'ogg';
     return 'wav';
   }
 
@@ -3276,13 +3440,14 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     // 暗中调用 AI 引擎生成，但不暴露在聊天历史中。
     // persistResponse=false 保证生成的回复不会写入聊天室，也不会被自动摘要捕获；
     // includeChatHistory=false 避免今日一言影响正式对话的上下文。
-    final recentQuotes = (await Future.wait(List.generate(
-            3,
-            (i) async => await db.getKV(
-                'quote_text_${botId}_${DateTime.now().subtract(Duration(days: i + 1)).year}-${DateTime.now().subtract(Duration(days: i + 1)).month}-${DateTime.now().subtract(Duration(days: i + 1)).day}'))))
-        .whereType<String>()
-        .where((e) => e.isNotEmpty)
-        .join('｜');
+    final recentQuotes = (await Future.wait(
+      List.generate(
+        3,
+        (i) async => await db.getKV(
+          'quote_text_${botId}_${DateTime.now().subtract(Duration(days: i + 1)).year}-${DateTime.now().subtract(Duration(days: i + 1)).month}-${DateTime.now().subtract(Duration(days: i + 1)).day}',
+        ),
+      ),
+    )).whereType<String>().where((e) => e.isNotEmpty).join('｜');
     final res = await sendMessage(
       botId: botId,
       priority: false,
@@ -3397,7 +3562,8 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     bool force = false,
   }) async {
     if ((!force && !_needsWebSearch(query)) ||
-        await db.getKV('web_search_enabled') != 'true') return [];
+        await db.getKV('web_search_enabled') != 'true')
+      return [];
     final apiKey = (await db.getKV('web_search_api_key') ?? '').trim();
     if (apiKey.isEmpty) return [];
     final provider = _normalizeSearchProvider(
@@ -3451,24 +3617,28 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         final body = jsonDecode(utf8.decode(response.bodyBytes));
         rows = _searchRows(body['organic']);
       } else if (provider == 'Brave Search') {
-        response = await http.get(
-          Uri.parse(
-            'https://api.search.brave.com/res/v1/web/search?q=${Uri.encodeQueryComponent(query)}&count=5',
-          ),
-          headers: {
-            'Accept': 'application/json',
-            'X-Subscription-Token': apiKey,
-          },
-        ).timeout(const Duration(seconds: 15));
+        response = await http
+            .get(
+              Uri.parse(
+                'https://api.search.brave.com/res/v1/web/search?q=${Uri.encodeQueryComponent(query)}&count=5',
+              ),
+              headers: {
+                'Accept': 'application/json',
+                'X-Subscription-Token': apiKey,
+              },
+            )
+            .timeout(const Duration(seconds: 15));
         final body = jsonDecode(utf8.decode(response.bodyBytes));
         rows = _searchRows(body['web']?['results']);
       } else {
-        response = await http.get(
-          Uri.parse(
-            'https://api.bing.microsoft.com/v7.0/search?q=${Uri.encodeQueryComponent(query)}&count=5',
-          ),
-          headers: {'Ocp-Apim-Subscription-Key': apiKey},
-        ).timeout(const Duration(seconds: 15));
+        response = await http
+            .get(
+              Uri.parse(
+                'https://api.bing.microsoft.com/v7.0/search?q=${Uri.encodeQueryComponent(query)}&count=5',
+              ),
+              headers: {'Ocp-Apim-Subscription-Key': apiKey},
+            )
+            .timeout(const Duration(seconds: 15));
         final body = jsonDecode(utf8.decode(response.bodyBytes));
         rows = _searchRows(body['webPages']?['value']);
       }
@@ -3560,7 +3730,8 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
             'title':
                 row['title']?.toString() ?? row['name']?.toString() ?? '网页来源',
             'url': row['url']?.toString() ?? row['link']?.toString() ?? '',
-            'snippet': row['content']?.toString() ??
+            'snippet':
+                row['content']?.toString() ??
                 row['snippet']?.toString() ??
                 row['description']?.toString() ??
                 '',
@@ -3579,14 +3750,13 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     required String botId,
     required String prompt,
     bool usePortraitReference = false,
-  }) =>
-      _generateImageIfAuthorized(
-        db: DBManager(),
-        botId: botId,
-        prompt: prompt,
-        force: true,
-        usePortraitReference: usePortraitReference,
-      );
+  }) => _generateImageIfAuthorized(
+    db: DBManager(),
+    botId: botId,
+    prompt: prompt,
+    force: true,
+    usePortraitReference: usePortraitReference,
+  );
 
   String _imagePromptWithStyle(String prompt, String style) {
     final normalized = prompt.trim();
@@ -3603,18 +3773,21 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     UserImageEditSelection? userImageEdit,
   }) async {
     if ((!force && !_needsImageGeneration(prompt)) ||
-        await db.getKV('bot_image_generation_enabled') == 'false') return null;
+        await db.getKV('bot_image_generation_enabled') == 'false')
+      return null;
     final prefs = await SharedPreferences.getInstance();
-    final imageModelId =
-        (prefs.getString('image_gen_model_$botId') ?? '').trim();
+    final imageModelId = (prefs.getString('image_gen_model_$botId') ?? '')
+        .trim();
     if (imageModelId.isEmpty) {
       AppLogService.instance.add('IMAGE_GEN', '生图模型未配置（botId=$botId）');
       return null;
     }
     final provider = await db.getChatProviderById(imageModelId);
     if (provider == null) {
-      AppLogService.instance
-          .add('IMAGE_GEN', '生图模型提供商不存在（modelId=$imageModelId）');
+      AppLogService.instance.add(
+        'IMAGE_GEN',
+        '生图模型提供商不存在（modelId=$imageModelId）',
+      );
       return null;
     }
     final baseUrl = (provider['base_url']?.toString() ?? '').replaceFirst(
@@ -3627,12 +3800,16 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     }
     // Temporary edits send the model-authored prompt byte-for-byte. Do not
     // read bot style, outfit or portrait reference settings in this branch.
-    final imagePrompt = userImageEdit?.prompt ??
+    final imagePrompt =
+        userImageEdit?.prompt ??
         _imagePromptWithStyle(
-            prompt, (await db.getKV('bot_image_style') ?? '').trim());
+          prompt,
+          (await db.getKV('bot_image_style') ?? '').trim(),
+        );
     final isImageEdit = userImageEdit != null || usePortraitReference;
     try {
-      final referencePath = userImageEdit?.path ??
+      final referencePath =
+          userImageEdit?.path ??
           (usePortraitReference
               ? (await db.getKV('bot_image_reference_$botId') ?? '').trim()
               : '');
@@ -3641,8 +3818,10 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         return null;
       }
       final reference = isImageEdit
-          ? await modelImageBytes(referencePath,
-              compress: await db.getKV('image_compression_enabled') != 'false')
+          ? await modelImageBytes(
+              referencePath,
+              compress: await db.getKV('image_compression_enabled') != 'false',
+            )
           : null;
       AppLogService.instance.addJson('IMAGE_GEN', '开始请求生图', {
         'bot_id': botId,
@@ -3665,9 +3844,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       final client = http.Client();
       late http.Response response;
       try {
-        response = await (() async =>
-                http.Response.fromStream(await client.send(request)))()
-            .timeout(const Duration(seconds: 120));
+        response = await (() async => http.Response.fromStream(
+          await client.send(request),
+        ))().timeout(const Duration(seconds: 120));
       } finally {
         client.close();
       }
@@ -3704,8 +3883,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       final url = item['url']?.toString() ?? '';
       if (url.startsWith('http')) {
         AppLogService.instance.add('IMAGE_GEN', '开始下载图片：$url');
-        final file =
-            await http.get(Uri.parse(url)).timeout(const Duration(seconds: 90));
+        final file = await http
+            .get(Uri.parse(url))
+            .timeout(const Duration(seconds: 90));
         if (file.statusCode == 200) {
           await File(path).writeAsBytes(file.bodyBytes);
           AppLogService.instance.add('IMAGE_GEN', '生图成功（URL 下载模式）：$path');
@@ -3803,25 +3983,27 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     Future<Map<String, dynamic>> executeOnce(Map<String, dynamic> call) async {
       await cancellationToken?.checkRequestAllowed();
       final name = (call['function'] as Map?)?['name']?.toString() ?? '';
-      if (!requestTools
-          .any((tool) => (tool['function'] as Map?)?['name'] == name)) {
+      if (!requestTools.any(
+        (tool) => (tool['function'] as Map?)?['name'] == name,
+      )) {
         return {
-          'result': {'ok': false, 'error': '本任务未授权该工具：$name'}
+          'result': {'ok': false, 'error': '本任务未授权该工具：$name'},
         };
       }
       if ((name == 'set_emotion' || name == 'send_sticker') &&
           completedTools.contains(name)) {
-        AppLogService.instance
-            .add('TOOLS', '跳过重复工具调用：$name id=${call['id']}，本轮已成功执行');
+        AppLogService.instance.add(
+          'TOOLS',
+          '跳过重复工具调用：$name id=${call['id']}，本轮已成功执行',
+        );
         return {
-          'result': {
-            'ok': false,
-            'error': '本轮工具已成功调用，不允许重复执行。',
-          },
+          'result': {'ok': false, 'error': '本轮工具已成功调用，不允许重复执行。'},
         };
       }
-      AppLogService.instance.add('TOOLS',
-          '开始执行工具：${name.isEmpty ? "缺少工具名称" : name}（id=${call['id']}，argumentsLength=${(call['function'] as Map?)?['arguments']?.toString().length ?? 0}）');
+      AppLogService.instance.add(
+        'TOOLS',
+        '开始执行工具：${name.isEmpty ? "缺少工具名称" : name}（id=${call['id']}，argumentsLength=${(call['function'] as Map?)?['arguments']?.toString().length ?? 0}）',
+      );
       final stopwatch = Stopwatch()..start();
       Map<String, dynamic> result;
       try {
@@ -3836,10 +4018,12 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       } on AICancelledException {
         rethrow;
       } catch (error, stack) {
-        AppLogService.instance.add('TOOLS',
-            '工具执行异常：$name id=${call['id']} elapsedMs=${stopwatch.elapsedMilliseconds} error=$error\n$stack');
+        AppLogService.instance.add(
+          'TOOLS',
+          '工具执行异常：$name id=${call['id']} elapsedMs=${stopwatch.elapsedMilliseconds} error=$error\n$stack',
+        );
         result = {
-          'result': {'ok': false, 'error': '工具执行异常：$error'}
+          'result': {'ok': false, 'error': '工具执行异常：$error'},
         };
       }
       await cancellationToken?.checkRequestAllowed();
@@ -3887,24 +4071,31 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         if (requestTools.isNotEmpty) 'tool_choice': 'auto',
         if (onDelta != null) 'stream': true,
       });
-      _logRequestPrefix('$cacheScope|$requestId|tool_chain', followUpId,
-          followUpPayload, const {});
+      _logRequestPrefix(
+        '$cacheScope|$requestId|tool_chain',
+        followUpId,
+        followUpPayload,
+        const {},
+      );
       final followUp = await _withCancellableClient(
-          cancellationToken,
-          (client) => client
-              .post(
-                Uri.parse('$baseUrl/chat/completions'),
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': 'Bearer $apiKey',
-                },
-                body: jsonEncode(followUpPayload),
-              )
-              .timeout(const Duration(seconds: 60)));
+        cancellationToken,
+        (client) => client
+            .post(
+              Uri.parse('$baseUrl/chat/completions'),
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer $apiKey',
+              },
+              body: jsonEncode(followUpPayload),
+            )
+            .timeout(const Duration(seconds: 60)),
+      );
       await cancellationToken?.checkRequestAllowed();
       if (followUp.statusCode != 200) {
-        AppLogService.instance
-            .add('TOOLS', '工具后续请求失败：HTTP ${followUp.statusCode}');
+        AppLogService.instance.add(
+          'TOOLS',
+          '工具后续请求失败：HTTP ${followUp.statusCode}',
+        );
         replyTextCallback('工具执行后的回复请求失败，请查看工具执行结果。');
         return;
       }
@@ -3912,16 +4103,21 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       final message = decoded['choices']?[0]?['message'];
       final fu = decoded['usage'];
       if (fu is Map) {
-        AppLogService.instance
-            .add('CACHE', '工具后续响应：round=${round + 1} model=$modelName');
-        _logCacheUsage(fu,
-            stage: 'tool_follow_up',
-            requestId: followUpId,
-            responseMetadata: {
-              ...cacheResponseMetadata(decoded as Map),
-              'provider_request_id': followUp.headers['x-request-id'] ??
-                  followUp.headers['request-id'],
-            });
+        AppLogService.instance.add(
+          'CACHE',
+          '工具后续响应：round=${round + 1} model=$modelName',
+        );
+        _logCacheUsage(
+          fu,
+          stage: 'tool_follow_up',
+          requestId: followUpId,
+          responseMetadata: {
+            ...cacheResponseMetadata(decoded as Map),
+            'provider_request_id':
+                followUp.headers['x-request-id'] ??
+                followUp.headers['request-id'],
+          },
+        );
         usageCallback(fu);
       }
       if (message is! Map) return;
@@ -3932,17 +4128,14 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       }
       final nextCalls = message['tool_calls'] is List
           ? (message['tool_calls'] as List)
-              .whereType<Map>()
-              .map((call) => Map<String, dynamic>.from(call))
-              .toList()
+                .whereType<Map>()
+                .map((call) => Map<String, dynamic>.from(call))
+                .toList()
           : <Map<String, dynamic>>[];
       if (nextCalls.isEmpty) {
         final stillMissing = requiredToolNames.difference(completedTools);
         if (stillMissing.isNotEmpty && round < 1) {
-          messages.add({
-            'role': 'assistant',
-            'content': message['content'],
-          });
+          messages.add({'role': 'assistant', 'content': message['content']});
           messages.add({
             'role': 'system',
             'content':
@@ -3992,9 +4185,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
   Future<bool> _shouldSuggestStickerForTurn(DBManager db) async {
     final chance =
         (int.tryParse(await db.getKV('bot_sticker_chance') ?? '') ?? 30).clamp(
-      0,
-      100,
-    );
+          0,
+          100,
+        );
     final selected =
         chance >= 100 || (chance > 0 && Random.secure().nextInt(100) < chance);
     AppLogService.instance.add(
@@ -4141,17 +4334,19 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
 
   Future<ToolPackageCatalog> _toolPackages(DBManager db, String botId) async =>
       ToolPackageCatalog(
-          skills: await db.querySkills(botId: botId),
-          servers: await db.queryMcpServers(botId: botId),
-          skillTools: await db.queryEnabledSkillTools(botId: botId),
-          mcpTools: await db.queryEnabledMcpTools(botId: botId));
+        skills: await db.querySkills(botId: botId),
+        servers: await db.queryMcpServers(botId: botId),
+        skillTools: await db.queryEnabledSkillTools(botId: botId),
+        mcpTools: await db.queryEnabledMcpTools(botId: botId),
+      );
 
   Future<List<Map<String, dynamic>>> _buildExternalTools(
-          DBManager db, String botId) async =>
-      [
-        ...(await _toolPackages(db, botId)).schemas(),
-        ...await PluginService.instance.schemas(),
-      ];
+    DBManager db,
+    String botId,
+  ) async => [
+    ...(await _toolPackages(db, botId)).schemas(),
+    ...await PluginService.instance.schemas(),
+  ];
 
   Future<Map<String, dynamic>> _executePackageTool({
     required DBManager db,
@@ -4161,212 +4356,216 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
   }) async {
     try {
       return await executeToolPackage(
-          catalog: await _toolPackages(db, botId),
-          name: name,
-          args: args,
-          execute: (source, id, toolName, arguments, referenceReader) async {
-            if (source == 'skill') {
-              if (referenceReader) {
-                return _executeNativeToolCall(db: db, botId: botId, call: {
-                  'function': {
-                    'name': 'read_skill_file',
-                    'arguments': jsonEncode({...arguments, 'id': id})
-                  }
-                });
-              }
-              return _executeSkillToolCall(
-                  db: db,
-                  botId: botId,
-                  name: skillToolName(id, toolName),
-                  args: arguments);
-            }
-            return _executeMcpToolCall(
+        catalog: await _toolPackages(db, botId),
+        name: name,
+        args: args,
+        execute: (source, id, toolName, arguments, referenceReader) async {
+          if (source == 'skill') {
+            if (referenceReader) {
+              return _executeNativeToolCall(
                 db: db,
                 botId: botId,
-                name: mcpToolName(id, toolName),
-                args: arguments);
-          });
+                call: {
+                  'function': {
+                    'name': 'read_skill_file',
+                    'arguments': jsonEncode({...arguments, 'id': id}),
+                  },
+                },
+              );
+            }
+            return _executeSkillToolCall(
+              db: db,
+              botId: botId,
+              name: skillToolName(id, toolName),
+              args: arguments,
+            );
+          }
+          return _executeMcpToolCall(
+            db: db,
+            botId: botId,
+            name: mcpToolName(id, toolName),
+            args: arguments,
+          );
+        },
+      );
     } catch (error) {
       return {
-        'result': {'ok': false, 'error': '工具包调用失败：$error'}
+        'result': {'ok': false, 'error': '工具包调用失败：$error'},
       };
     }
   }
 
   Map<String, dynamic> _setEmotionToolSchema() => {
-        'type': 'function',
-        'function': {
-          'name': 'set_emotion',
-          'description': '只有心情相较当前状态发生有意义变化时才调用，更新角色心情；没有变化无需调用。不得在聊天正文输出心情标签。',
-          'parameters': {
-            'type': 'object',
-            'properties': {
-              'mood': {
-                'type': 'string',
-                'enum': ['平静', '开心', '伤心', '生气', '害羞', '兴奋'],
-              },
-              'intensity': {'type': 'integer', 'minimum': 0, 'maximum': 100},
-              'reason': {'type': 'string', 'maxLength': 160},
-            },
-            'required': ['mood', 'intensity'],
-            'additionalProperties': false,
+    'type': 'function',
+    'function': {
+      'name': 'set_emotion',
+      'description': '只有心情相较当前状态发生有意义变化时才调用，更新角色心情；没有变化无需调用。不得在聊天正文输出心情标签。',
+      'parameters': {
+        'type': 'object',
+        'properties': {
+          'mood': {
+            'type': 'string',
+            'enum': ['平静', '开心', '伤心', '生气', '害羞', '兴奋'],
           },
+          'intensity': {'type': 'integer', 'minimum': 0, 'maximum': 100},
+          'reason': {'type': 'string', 'maxLength': 160},
         },
-      };
+        'required': ['mood', 'intensity'],
+        'additionalProperties': false,
+      },
+    },
+  };
 
   Map<String, dynamic> _adaptiveSilenceToolSchema() => {
-        'type': 'function',
-        'function': {
-          'name': 'choose_silence',
-          'description':
-              '在角色自己的睡眠时段可自主选择暂不回复；或在用户明确不希望回复、对话自然结束且无需回应、主动问候判断不宜打扰时调用。调用后本轮不会发送任何文字。清醒时不可用于求助、悲伤、愤怒、困惑、危机、提问或任何需要回应的情况；绝不可作为惩罚、冷暴力、控制或施压。',
-          'parameters': {
-            'type': 'object',
-            'properties': {},
-            'additionalProperties': false,
-          },
-        },
-      };
+    'type': 'function',
+    'function': {
+      'name': 'choose_silence',
+      'description':
+          '在角色自己的睡眠时段可自主选择暂不回复；或在用户明确不希望回复、对话自然结束且无需回应、主动问候判断不宜打扰时调用。调用后本轮不会发送任何文字。清醒时不可用于求助、悲伤、愤怒、困惑、危机、提问或任何需要回应的情况；绝不可作为惩罚、冷暴力、控制或施压。',
+      'parameters': {
+        'type': 'object',
+        'properties': {},
+        'additionalProperties': false,
+      },
+    },
+  };
   Map<String, dynamic> _memoryToolSchema() => {
-        'type': 'function',
-        'function': {
-          'name': 'save_memory',
-          'description':
-              '按记忆分类与写入步骤保存新事实。事件必须写入“记忆”，禁止写入人物画像或关系。更新已有条目须传 memory_id 并提交保留旧有效信息的完整新版。禁止重复保存；仅 ok:true 表示写入成功。',
-          'parameters': {
-            'type': 'object',
-            'properties': {
-              'content': {
-                'type': 'string',
-                'description':
-                    '事件须写清主体，可用姓名或指代明确的人称，你自己的经历可用“我”，他／她须性别已知；人物画像只写总结出的稳定特点，禁止写具体事件；更新须保留旧有效信息并提交完整内容'
-              },
-              'importance': {
-                'type': 'integer',
-                'minimum': 1,
-                'maximum': 5,
-                'description': '记忆优先级：1低，3普通，5重要；仅相关记忆参与排序'
-              },
-              'keys': {
-                'type': 'array',
-                'items': {'type': 'string'},
-                'description':
-                    '用于检索的事件或主题关键词；绝对禁止你自己或对方的姓名、昵称、别名及包含这些名字的短语；无合适词时传空数组'
-              },
-              'memory_id': {
-                'type': 'string',
-                'description': '更新已有条目时填写最近世界书或搜索结果中的 id；新建时省略。不得跨类别覆盖。'
-              },
-              'category': {
-                'type': 'string',
-                'description': '从当前世界书类别中选择；默认记忆，新类别须先创建'
-              },
-              'type': {
-                'type': 'string',
-                'enum': ['long', 'short'],
-                'description': 'long 用于稳定画像或偏好；short 用于重要近期事件',
-              },
-            },
-            'required': ['content', 'type', 'category'],
-            'additionalProperties': false,
+    'type': 'function',
+    'function': {
+      'name': 'save_memory',
+      'description':
+          '按记忆分类与写入步骤保存新事实。事件必须写入“记忆”，禁止写入人物画像或关系。更新已有条目须传 memory_id 并提交保留旧有效信息的完整新版。禁止重复保存；仅 ok:true 表示写入成功。',
+      'parameters': {
+        'type': 'object',
+        'properties': {
+          'content': {
+            'type': 'string',
+            'description':
+                '事件须写清主体，可用姓名或指代明确的人称，你自己的经历可用“我”，他／她须性别已知；人物画像只写总结出的稳定特点，禁止写具体事件；更新须保留旧有效信息并提交完整内容',
+          },
+          'importance': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': 5,
+            'description': '记忆优先级：1低，3普通，5重要；仅相关记忆参与排序',
+          },
+          'keys': {
+            'type': 'array',
+            'items': {'type': 'string'},
+            'description':
+                '用于检索的事件或主题关键词；绝对禁止你自己或对方的姓名、昵称、别名及包含这些名字的短语；无合适词时传空数组',
+          },
+          'memory_id': {
+            'type': 'string',
+            'description': '更新已有条目时填写最近世界书或搜索结果中的 id；新建时省略。不得跨类别覆盖。',
+          },
+          'category': {
+            'type': 'string',
+            'description': '从当前世界书类别中选择；默认记忆，新类别须先创建',
+          },
+          'type': {
+            'type': 'string',
+            'enum': ['long', 'short'],
+            'description': 'long 用于稳定画像或偏好；short 用于重要近期事件',
           },
         },
-      };
+        'required': ['content', 'type', 'category'],
+        'additionalProperties': false,
+      },
+    },
+  };
 
   Map<String, dynamic> _createMemoryCategoryToolSchema() => {
-        'type': 'function',
-        'function': {
-          'name': 'create_memory_category',
-          'description': '当现有记忆类别都不合适时创建一个简洁的类别；成功后再用 save_memory 添加记忆。',
-          'parameters': {
-            'type': 'object',
-            'properties': {
-              'name': {'type': 'string', 'description': '类别名称'}
-            },
-            'required': ['name'],
-            'additionalProperties': false,
-          },
+    'type': 'function',
+    'function': {
+      'name': 'create_memory_category',
+      'description': '当现有记忆类别都不合适时创建一个简洁的类别；成功后再用 save_memory 添加记忆。',
+      'parameters': {
+        'type': 'object',
+        'properties': {
+          'name': {'type': 'string', 'description': '类别名称'},
         },
-      };
+        'required': ['name'],
+        'additionalProperties': false,
+      },
+    },
+  };
   Map<String, dynamic> _diaryToolSchema() => {
-        'type': 'function',
-        'function': {
-          'name': 'write_diary',
-          'description':
-              '在以下两种场景时调用：1）本轮聊天中出现明确的用户事件、稳定事实或真实感受；2）你自己今天的真实经历、想法、感受、做过的事、见到的人或场景。日记是你的私人记录，可以写用户的事，也可以写你自己的生活、心情或观察，但不能编造未发生的事。',
-          'parameters': {
-            'type': 'object',
-            'properties': {
-              'entry': {
-                'type': 'string',
-                'description': '第一人称日记正文，可以记录用户相关事件，也可以记录你自己今天的经历、心情或想法'
-              },
-            },
-            'required': ['entry'],
-            'additionalProperties': false,
+    'type': 'function',
+    'function': {
+      'name': 'write_diary',
+      'description':
+          '在以下两种场景时调用：1）本轮聊天中出现明确的用户事件、稳定事实或真实感受；2）你自己今天的真实经历、想法、感受、做过的事、见到的人或场景。日记是你的私人记录，可以写用户的事，也可以写你自己的生活、心情或观察，但不能编造未发生的事。',
+      'parameters': {
+        'type': 'object',
+        'properties': {
+          'entry': {
+            'type': 'string',
+            'description': '第一人称日记正文，可以记录用户相关事件，也可以记录你自己今天的经历、心情或想法',
           },
         },
-      };
+        'required': ['entry'],
+        'additionalProperties': false,
+      },
+    },
+  };
   Map<String, dynamic> _queryDiaryToolSchema() => {
-        'type': 'function',
-        'function': {
-          'name': 'query_diary',
-          'description':
-              '仅在需要回顾自己某一天的日记且用户或当前对话已明确日期时调用。日记不会自动提供给你；只能查询自己的日记，date 必须为 YYYY-MM-DD。',
-          'parameters': {
-            'type': 'object',
-            'properties': {
-              'date': {
-                'type': 'string',
-                'description': '要查询的本地日期，格式 YYYY-MM-DD',
-              },
-            },
-            'required': ['date'],
-            'additionalProperties': false,
-          },
+    'type': 'function',
+    'function': {
+      'name': 'query_diary',
+      'description':
+          '仅在需要回顾自己某一天的日记且用户或当前对话已明确日期时调用。日记不会自动提供给你；只能查询自己的日记，date 必须为 YYYY-MM-DD。',
+      'parameters': {
+        'type': 'object',
+        'properties': {
+          'date': {'type': 'string', 'description': '要查询的本地日期，格式 YYYY-MM-DD'},
         },
-      };
+        'required': ['date'],
+        'additionalProperties': false,
+      },
+    },
+  };
 
   Map<String, dynamic> _searchMemoryToolSchema() => {
-        'type': 'function',
-        'function': {
-          'name': 'search_memory',
-          'description':
-              '当需要主动查找世界书记忆库中的特定信息时调用（例如用户询问"我的时薪是多少"、"你记得XX吗"、"我之前跟你说过什么"）。使用语义搜索，能匹配同义词（如"工资"能匹配到"时薪"）。不会自动注入记忆；需要时必须主动搜索。',
-          'parameters': {
-            'type': 'object',
-            'properties': {
-              'query': {
-                'type': 'string',
-                'description': '搜索关键词或问题描述，例如"时薪"、"工资"、"收入信息"',
-              },
-              'limit': {
-                'type': 'integer',
-                'description': '返回结果数量，默认5条',
-                'minimum': 1,
-                'maximum': 10,
-              },
-            },
-            'required': ['query'],
-            'additionalProperties': false,
+    'type': 'function',
+    'function': {
+      'name': 'search_memory',
+      'description':
+          '当需要主动查找世界书记忆库中的特定信息时调用（例如用户询问"我的时薪是多少"、"你记得XX吗"、"我之前跟你说过什么"）。使用语义搜索，能匹配同义词（如"工资"能匹配到"时薪"）。不会自动注入记忆；需要时必须主动搜索。',
+      'parameters': {
+        'type': 'object',
+        'properties': {
+          'query': {
+            'type': 'string',
+            'description': '搜索关键词或问题描述，例如"时薪"、"工资"、"收入信息"',
+          },
+          'limit': {
+            'type': 'integer',
+            'description': '返回结果数量，默认5条',
+            'minimum': 1,
+            'maximum': 10,
           },
         },
-      };
+        'required': ['query'],
+        'additionalProperties': false,
+      },
+    },
+  };
 
   Map<String, dynamic> _requestVoiceReplyToolSchema() => {
-        'type': 'function',
-        'function': {
-          'name': 'request_voice_reply',
-          'description':
-              '当本轮安排语音、用户明确要求语音，或内容适合用语音自然表达时调用。必须在 speech 中填写本条语音的情绪和演绎指导；正文不输出语音参数。不发送语音时无需调用。',
-          'parameters': {
-            'type': 'object',
-            'properties': {'speech': voiceMessageSpeechSchema()},
-            'required': ['speech'],
-            'additionalProperties': false,
-          },
-        },
-      };
+    'type': 'function',
+    'function': {
+      'name': 'request_voice_reply',
+      'description':
+          '当本轮安排语音、用户明确要求语音，或内容适合用语音自然表达时调用。必须在 speech 中填写本条语音的情绪和演绎指导；正文不输出语音参数。不发送语音时无需调用。',
+      'parameters': {
+        'type': 'object',
+        'properties': {'speech': voiceMessageSpeechSchema()},
+        'required': ['speech'],
+        'additionalProperties': false,
+      },
+    },
+  };
 
   String _redactToolInput(Map<String, dynamic> args) => redactToolInput(args);
 
@@ -4382,7 +4581,7 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         .firstOrNull;
     if (row == null)
       return {
-        'result': {'ok': false, 'error': 'Skill 工具不可用'}
+        'result': {'ok': false, 'error': 'Skill 工具不可用'},
       };
     final skillId = row['skill_id'];
     final toolName = row['name'];
@@ -4395,9 +4594,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     final definitions = manifest is Map ? manifest['tools'] : null;
     final definition = definitions is List
         ? definitions.cast<dynamic>().firstWhere(
-              (item) => item is Map && item['name']?.toString() == toolName,
-              orElse: () => null,
-            )
+            (item) => item is Map && item['name']?.toString() == toolName,
+            orElse: () => null,
+          )
         : null;
     if (definition is! Map) {
       return {
@@ -4417,11 +4616,7 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     if (executor == 'prompt') {
       final template = definition['prompt']?.toString().trim() ?? '';
       return {
-        'result': {
-          'ok': true,
-          'content': template,
-          'arguments': args,
-        },
+        'result': {'ok': true, 'content': template, 'arguments': args},
       };
     }
     if (executor != 'http') {
@@ -4435,13 +4630,15 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       if (uri == null || !uri.hasScheme)
         throw const FormatException('HTTP URL 无效');
       final headers = <String, String>{'Content-Type': 'application/json'};
-      final secret = await const FlutterSecureStorage()
-          .read(key: 'skill_headers_$skillId');
+      final secret = await const FlutterSecureStorage().read(
+        key: 'skill_headers_$skillId',
+      );
       if (secret != null && secret.isNotEmpty) {
         final decoded = jsonDecode(secret);
         if (decoded is Map)
           decoded.forEach(
-              (key, value) => headers[key.toString()] = value.toString());
+            (key, value) => headers[key.toString()] = value.toString(),
+          );
       }
       final response = await http
           .post(uri, headers: headers, body: jsonEncode(args))
@@ -4453,24 +4650,26 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           ? response.body.substring(0, 100000)
           : response.body;
       await db.insertToolAudit(
-          source: 'skill',
-          toolName: name,
-          inputSummary: _redactToolInput(args),
-          status: 'success',
-          durationMs: DateTime.now().difference(started).inMilliseconds);
+        source: 'skill',
+        toolName: name,
+        inputSummary: _redactToolInput(args),
+        status: 'success',
+        durationMs: DateTime.now().difference(started).inMilliseconds,
+      );
       return {
-        'result': {'ok': true, 'content': body}
+        'result': {'ok': true, 'content': body},
       };
     } catch (error) {
       await db.insertToolAudit(
-          source: 'skill',
-          toolName: name,
-          inputSummary: _redactToolInput(args),
-          status: 'error',
-          durationMs: DateTime.now().difference(started).inMilliseconds,
-          error: '工具执行失败（${error.runtimeType}）');
+        source: 'skill',
+        toolName: name,
+        inputSummary: _redactToolInput(args),
+        status: 'error',
+        durationMs: DateTime.now().difference(started).inMilliseconds,
+        error: '工具执行失败（${error.runtimeType}）',
+      );
       return {
-        'result': {'ok': false, 'error': 'HTTP Skill 调用失败：$error'}
+        'result': {'ok': false, 'error': 'HTTP Skill 调用失败：$error'},
       };
     }
   }
@@ -4539,10 +4738,7 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         durationMs: DateTime.now().difference(started).inMilliseconds,
       );
       return {
-        'result': {
-          'ok': true,
-          'content': content,
-        },
+        'result': {'ok': true, 'content': content},
       };
     } catch (error) {
       await db.insertToolAudit(
@@ -4569,7 +4765,7 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     final row = resolveMcpTool(rows, name);
     if (row == null)
       return {
-        'result': {'ok': false, 'error': 'MCP 工具不可用'}
+        'result': {'ok': false, 'error': 'MCP 工具不可用'},
       };
     final serverId = row['server_id'].toString();
     final toolName = row['name'].toString();
@@ -4626,7 +4822,7 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           'content': content,
           if (value is Map && value.containsKey('structuredContent'))
             'structuredContent': value['structuredContent'],
-        }
+        },
       };
     } catch (error) {
       await db.insertToolAudit(
@@ -4638,11 +4834,13 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         error: '工具执行失败（${error.runtimeType}）',
       );
       return {
-        'result': {'ok': false, 'error': 'MCP 调用失败：$error'}
+        'result': {'ok': false, 'error': 'MCP 调用失败：$error'},
       };
     } finally {
-      AppLogService.instance.add('MCP',
-          '调用 $serverId/$toolName，耗时 ${DateTime.now().difference(started).inMilliseconds}ms');
+      AppLogService.instance.add(
+        'MCP',
+        '调用 $serverId/$toolName，耗时 ${DateTime.now().difference(started).inMilliseconds}ms',
+      );
     }
   }
 
@@ -4655,25 +4853,32 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     Map<int, String> currentImages = const {},
   }) async {
     final before = await PluginService.instance.hook('tool.before', {
-      'botId': botId, 'call': call,
+      'botId': botId,
+      'call': call,
     });
     final Map<String, dynamic> result;
     if (before['handled'] == true && before['result'] is Map) {
       result = Map<String, dynamic>.from(before['result'] as Map);
     } else {
       result = await _executeNativeToolCallCore(
-        db: db, botId: botId,
+        db: db,
+        botId: botId,
         call: before['call'] is Map
-            ? Map<String, dynamic>.from(before['call'] as Map) : call,
+            ? Map<String, dynamic>.from(before['call'] as Map)
+            : call,
         allowedStickerTypes: allowedStickerTypes,
-        inspectableImages: inspectableImages, currentImages: currentImages,
+        inspectableImages: inspectableImages,
+        currentImages: currentImages,
       );
     }
     final after = await PluginService.instance.hook('tool.after', {
-      'botId': botId, 'call': call, 'result': result,
+      'botId': botId,
+      'call': call,
+      'result': result,
     });
     return after['result'] is Map
-        ? Map<String, dynamic>.from(after['result'] as Map) : result;
+        ? Map<String, dynamic>.from(after['result'] as Map)
+        : result;
   }
 
   Future<Map<String, dynamic>> _executeNativeToolCallCore({
@@ -4707,19 +4912,21 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     // Keep old in-flight calls compatible without disclosing raw executors.
     if (name == 'read_skill') {
       return _executePackageTool(
-          db: db,
-          botId: botId,
-          name: 'get_tool_package',
-          args: {'package_id': 'skill:${args['id']}'});
+        db: db,
+        botId: botId,
+        name: 'get_tool_package',
+        args: {'package_id': 'skill:${args['id']}'},
+      );
     }
     if (name == 'read_skill_file') {
       try {
-        final skill = (await db.querySkills(botId: botId))
-            .where((s) => s['id'] == args['id'] && s['enabled'] == 1)
-            .firstOrNull;
+        final skill = (await db.querySkills(
+          botId: botId,
+        )).where((s) => s['id'] == args['id'] && s['enabled'] == 1).firstOrNull;
         if (skill == null) throw const FormatException('技能不存在或已停用');
         final manifest = Map<String, dynamic>.from(
-            jsonDecode(skill['manifest_json'].toString()) as Map);
+          jsonDecode(skill['manifest_json'].toString()) as Map,
+        );
         final path = SkillPackage.safePath(args['path']?.toString() ?? '');
         if (!(manifest['files'] as List? ?? []).contains(path))
           throw const FormatException('文件不属于此技能');
@@ -4739,12 +4946,12 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
             'ok': true,
             'content': text.substring(offset, end),
             'next_offset': end < text.length ? end : null,
-            'total_characters': text.length
-          }
+            'total_characters': text.length,
+          },
         };
       } catch (error) {
         return {
-          'result': {'ok': false, 'error': '读取 Skill 失败：$error'}
+          'result': {'ok': false, 'error': '读取 Skill 失败：$error'},
         };
       }
     }
@@ -4753,7 +4960,11 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     }
     if (name.startsWith('skill_')) {
       return _executeSkillToolCall(
-          db: db, botId: botId, name: name, args: args);
+        db: db,
+        botId: botId,
+        name: name,
+        args: args,
+      );
     }
     if (name == 'set_emotion') {
       const moods = {'平静', '开心', '伤心', '生气', '害羞', '兴奋'};
@@ -4767,8 +4978,11 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           'result': {'ok': false, 'error': '心情或强度无效'},
         };
       }
-      await EmotionStateService.instance
-          .setMood(botId, mood, intensity: intensity);
+      await EmotionStateService.instance.setMood(
+        botId,
+        mood,
+        intensity: intensity,
+      );
       await db.insertToolAudit(
         source: 'native',
         toolName: name,
@@ -4901,39 +5115,42 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
             throw StateError('完整视频文件不可用，请重新发送视频');
           }
           final bot = await db.getBotById(botId);
-          final modelId = (prefs.getString('video_model_$botId') ??
-                  bot?['video_model']?.toString() ??
-                  '')
-              .trim();
+          final modelId =
+              (prefs.getString('video_model_$botId') ??
+                      bot?['video_model']?.toString() ??
+                      '')
+                  .trim();
           if (modelId.isNotEmpty) {
             final analysis = await describeVideoForBot(
-                videoPath: path,
-                botId: botId,
-                providerId: modelId,
-                userText: '请分析整个视频，补充预览未覆盖的内容。');
+              videoPath: path,
+              botId: botId,
+              providerId: modelId,
+              userText: '请分析整个视频，补充预览未覆盖的内容。',
+            );
             return {
               'result': {'ok': true, 'video_id': videoId, 'full_video': true},
-              'message': analysis
+              'message': analysis,
             };
           }
           final service = VideoProcessingService.instance;
           final fullDuration = await service.getVideoDuration(path);
           if (fullDuration <= 0) throw StateError('无法读取完整视频时长');
           final frames = await service.extractFrames(
-              videoPath: path,
-              frameCount: (fullDuration / 8).ceil().clamp(1, 120),
-              duration: fullDuration,
-              previewLongVideo: false);
+            videoPath: path,
+            frameCount: (fullDuration / 8).ceil().clamp(1, 120),
+            duration: fullDuration,
+            previewLongVideo: false,
+          );
           if (frames.isEmpty) throw StateError('完整视频抽帧失败');
           return {
             'result': {
               'ok': true,
               'video_id': videoId,
               'full_video': true,
-              'duration': fullDuration
+              'duration': fullDuration,
             },
             'message': '未选择视频解析模型，以下为覆盖全片的采样画面，音频请结合先前转写；采样不能保证覆盖每个细节。',
-            'images': frames
+            'images': frames,
           };
         }
         // 构建视频信息响应
@@ -4973,8 +5190,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
 
               final videoService = VideoProcessingService.instance; // 需要导入该类
               if (duration <= 0) {
-                duration =
-                    await videoService.getVideoDuration(originalVideoPath);
+                duration = await videoService.getVideoDuration(
+                  originalVideoPath,
+                );
                 if (duration <= 0) throw StateError('无法读取历史视频时长');
                 videoInfo['duration'] = duration;
               }
@@ -5006,18 +5224,12 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
                 await prefs.setStringList('video_history_$botId', videoHistory);
               } else {
                 return {
-                  'result': {
-                    'ok': false,
-                    'error': '重新抽帧失败，无法获取视频内容。',
-                  },
+                  'result': {'ok': false, 'error': '重新抽帧失败，无法获取视频内容。'},
                 };
               }
             } catch (e) {
               return {
-                'result': {
-                  'ok': false,
-                  'error': '重新抽帧时出错：$e',
-                },
+                'result': {'ok': false, 'error': '重新抽帧时出错：$e'},
               };
             }
           } else if (platformLink != null && platformLink.isNotEmpty) {
@@ -5048,10 +5260,7 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
               error: '视频文件不存在或已被清理',
             );
             return {
-              'result': {
-                'ok': false,
-                'error': '视频文件不存在或已被清理，无法获取视频内容。',
-              },
+              'result': {'ok': false, 'error': '视频文件不存在或已被清理，无法获取视频内容。'},
             };
           }
         }
@@ -5070,10 +5279,10 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           final platformName = platform == 'douyin'
               ? '抖音'
               : platform == 'xiaohongshu'
-                  ? '小红书'
-                  : platform == 'bilibili'
-                      ? 'B站'
-                      : platform;
+              ? '小红书'
+              : platform == 'bilibili'
+              ? 'B站'
+              : platform;
           parts.add('来源：$platformName');
           if (title != null && title.isNotEmpty) {
             parts.add('标题：$title');
@@ -5119,7 +5328,7 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       final category = args['name']?.toString().trim() ?? '';
       if (category.isEmpty || category.length > 40 || category.contains('\n')) {
         return {
-          'result': {'ok': false, 'error': '类别名称须为1至40个字符的单行文本'}
+          'result': {'ok': false, 'error': '类别名称须为1至40个字符的单行文本'},
         };
       }
       if (!(await db.memoryCategories()).contains(category)) {
@@ -5129,8 +5338,8 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         'result': {
           'ok': true,
           'category': category,
-          'categories': await db.memoryCategories()
-        }
+          'categories': await db.memoryCategories(),
+        },
       };
     }
     if (name == 'save_memory') {
@@ -5142,8 +5351,8 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           'result': {
             'ok': false,
             'error': '请选择现有类别或先调用 create_memory_category',
-            'categories': await db.memoryCategories()
-          }
+            'categories': await db.memoryCategories(),
+          },
         };
       }
       if (content.isEmpty) {
@@ -5171,22 +5380,23 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           }
           if (previous == null) {
             return {
-              'result': {'ok': false, 'error': '更新目标不存在或类别不一致，禁止跨类别覆盖'}
+              'result': {'ok': false, 'error': '更新目标不存在或类别不一致，禁止跨类别覆盖'},
             };
           }
         }
         await db.upsertMemoryItem(
-            botId: botId,
-            id: memoryId.isEmpty ? null : memoryId,
-            title: previous?['title']?.toString() ?? '',
-            importance: (args['importance'] as num?)?.toInt(),
-            keys: args['keys'] is List
-                ? (args['keys'] as List).whereType<String>().toList()
-                : null,
-            expiresAt: (previous?['expires_at'] as num?)?.toInt(),
-            type: previous?['type']?.toString() ?? type,
-            content: content,
-            category: category);
+          botId: botId,
+          id: memoryId.isEmpty ? null : memoryId,
+          title: previous?['title']?.toString() ?? '',
+          importance: (args['importance'] as num?)?.toInt(),
+          keys: args['keys'] is List
+              ? (args['keys'] as List).whereType<String>().toList()
+              : null,
+          expiresAt: (previous?['expires_at'] as num?)?.toInt(),
+          type: previous?['type']?.toString() ?? type,
+          content: content,
+          category: category,
+        );
         AppLogService.instance.add(
           'MEMORY',
           '机器人通过 save_memory 工具写入$type 记忆：${content.length} 字',
@@ -5249,12 +5459,12 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
 
       try {
         final startTime = DateTime.now().millisecondsSinceEpoch;
-        final searchResult =
-            await WorldBookService.instance.searchMemoryForTool(
-          botId: botId,
-          query: query,
-          limit: limit.clamp(1, 10),
-        );
+        final searchResult = await WorldBookService.instance
+            .searchMemoryForTool(
+              botId: botId,
+              query: query,
+              limit: limit.clamp(1, 10),
+            );
         final durationMs = DateTime.now().millisecondsSinceEpoch - startTime;
 
         await db.insertToolAudit(
@@ -5281,14 +5491,14 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     if (name == 'request_voice_reply') {
       if (parseVoiceMessageSpeech(args['speech']) == null) {
         return {
-          'result': {'ok': false, 'error': '请填写 speech 情绪和演绎参数后重试。'}
+          'result': {'ok': false, 'error': '请填写 speech 情绪和演绎参数后重试。'},
         };
       }
       return {
         'result': {
           'ok': true,
           'speech': args['speech'],
-          'message': '本轮最终文字回复将按指定情绪生成语音；参数不要写进正文。'
+          'message': '本轮最终文字回复将按指定情绪生成语音；参数不要写进正文。',
         },
       };
     }
@@ -5372,7 +5582,7 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       var prompt = args['prompt']?.toString().trim() ?? '';
       if (prompt.isEmpty) {
         return {
-          'result': {'ok': false, 'error': '生图参数 prompt 不能为空，图片未生成，禁止声称已发送。'}
+          'result': {'ok': false, 'error': '生图参数 prompt 不能为空，图片未生成，禁止声称已发送。'},
         };
       }
       final hasPortraitReference =
@@ -5390,7 +5600,7 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           'result': {
             'ok': false,
             'error': error.message,
-            'message': '图片未生成，请修正参数后重新调用。'
+            'message': '图片未生成，请修正参数后重新调用。',
           },
         };
       }
@@ -5460,8 +5670,12 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         Future.delayed(const Duration(milliseconds: 1500), () async {
           final record = await db.getVoiceCallRecord(callId);
           if (record?['status'] != 'ringing') return;
-          VoiceCallStateService.instance
-              .startRinging(callId, botId, isIncoming: true, startedAt: now);
+          VoiceCallStateService.instance.startRinging(
+            callId,
+            botId,
+            isIncoming: true,
+            startedAt: now,
+          );
 
           // 发送通知
           await MessageDeliveryService.instance.sendNotification(
@@ -5507,11 +5721,13 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           'result': {'ok': false, 'error': '未来任务必须设置在当前时间之后'},
         };
       }
-      final frequency =
-          args['frequency']?.toString() == 'daily' ? 'daily' : 'once';
+      final frequency = args['frequency']?.toString() == 'daily'
+          ? 'daily'
+          : 'once';
       final existingTasks = await db.querySchedules(botId);
-      final normalizedTitle =
-          title.replaceAll(RegExp(r'\s+'), '').toLowerCase();
+      final normalizedTitle = title
+          .replaceAll(RegExp(r'\s+'), '')
+          .toLowerCase();
       final duplicate = existingTasks.any((task) {
         final oldTitle = (task['title']?.toString() ?? '')
             .replaceAll(RegExp(r'\s+'), '')
@@ -5556,8 +5772,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       return {
         'result': {
           'ok': updated != null,
-          'message':
-              updated == null ? '未修改：日程不存在、参数无效，或试图改动刚性事项。' : '今日生活状态已更新。',
+          'message': updated == null
+              ? '未修改：日程不存在、参数无效，或试图改动刚性事项。'
+              : '今日生活状态已更新。',
         },
       };
     }
@@ -5571,14 +5788,13 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     required String botId,
     required RequestPromptFeatures features,
     List<String> stickerEmotions = const [],
-  }) =>
-      buildRequestToolContext(
-        readSetting: db.getKV,
-        normalizeSearchProvider: _normalizeSearchProvider,
-        botId: botId,
-        features: features,
-        stickerEmotions: stickerEmotions,
-      );
+  }) => buildRequestToolContext(
+    readSetting: db.getKV,
+    normalizeSearchProvider: _normalizeSearchProvider,
+    botId: botId,
+    features: features,
+    stickerEmotions: stickerEmotions,
+  );
 
   String _sharedPostHistoryKey(Map<String, dynamic> msg) {
     final id = msg['id']?.toString() ?? '';
@@ -5625,7 +5841,8 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       final raw = jsonDecode(msg['content']?.toString() ?? '');
       if (raw is Map) payload = Map<String, dynamic>.from(raw);
     } catch (_) {}
-    final postId = payload?['post_id']?.toString().trim() ??
+    final postId =
+        payload?['post_id']?.toString().trim() ??
         payload?['id']?.toString().trim() ??
         '';
     if (postId.isNotEmpty) {
@@ -5633,19 +5850,23 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
       if (post == null) return sharedPostDeletedModelCopy;
       return sharedPostModelContext(
         deleted: false,
-        author: post['author_id']?.toString() ??
+        author:
+            post['author_id']?.toString() ??
             payload?['author']?.toString() ??
             '',
-        content: post['content']?.toString() ??
+        content:
+            post['content']?.toString() ??
             payload?['content']?.toString() ??
             '',
-        time: payload?['timestamp']?.toString() ??
+        time:
+            payload?['timestamp']?.toString() ??
             post['timestamp']?.toString() ??
             '',
-        hasImage: (post['image_path']?.toString() ??
-                payload?['image_path']?.toString() ??
-                '')
-            .isNotEmpty,
+        hasImage:
+            (post['image_path']?.toString() ??
+                    payload?['image_path']?.toString() ??
+                    '')
+                .isNotEmpty,
       );
     }
     final author = payload?['author']?.toString() ?? '';
@@ -5671,8 +5892,10 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     final userText = '请转述 [图片#$imageNumber]。';
     if (visionId == primaryVisionModel) {
       final bots = await DBManager().getAllBots();
-      final bot =
-          bots.firstWhere((item) => item['id'] == botId, orElse: () => {});
+      final bot = bots.firstWhere(
+        (item) => item['id'] == botId,
+        orElse: () => {},
+      );
       final providerId = bot['chat_model']?.toString().trim() ?? '';
       final provider = providerId.isEmpty
           ? null
@@ -5705,9 +5928,12 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
     String providerId, {
     AICancellationToken? cancellationToken,
     CallSpeechStyle? speechStyle,
-  }) =>
-      _generateTTS(text, providerId,
-          cancellationToken: cancellationToken, speechStyle: speechStyle);
+  }) => _generateTTS(
+    text,
+    providerId,
+    cancellationToken: cancellationToken,
+    speechStyle: speechStyle,
+  );
   Future<Map<String, dynamic>> testProviderCapabilities(
     String baseUrl,
     String apiKey,
@@ -5758,8 +5984,9 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         );
         if (!success(response) || response.bodyBytes.isEmpty) {
           final compact = responseText.replaceAll(RegExp(r'\s+'), ' ').trim();
-          final summary =
-              compact.length <= 240 ? compact : compact.substring(0, 240);
+          final summary = compact.length <= 240
+              ? compact
+              : compact.substring(0, 240);
           lastError = 'HTTP ${response.statusCode}: $summary';
           return false;
         }
@@ -5856,23 +6083,24 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
           0,
           0,
         ];
-        final request = http.MultipartRequest(
-          'POST',
-          Uri.parse('$root/audio/transcriptions'),
-        )
-          ..headers['Authorization'] = 'Bearer $apiKey'
-          ..fields['model'] = modelName
-          ..files.add(
-            http.MultipartFile.fromBytes(
-              'file',
-              wav,
-              filename: 'tidebot-test.wav',
-              contentType: null,
-            ),
-          );
+        final request =
+            http.MultipartRequest(
+                'POST',
+                Uri.parse('$root/audio/transcriptions'),
+              )
+              ..headers['Authorization'] = 'Bearer $apiKey'
+              ..fields['model'] = modelName
+              ..files.add(
+                http.MultipartFile.fromBytes(
+                  'file',
+                  wav,
+                  filename: 'tidebot-test.wav',
+                  contentType: null,
+                ),
+              );
         final response = await request.send().timeout(
-              const Duration(seconds: 20),
-            );
+          const Duration(seconds: 20),
+        );
         return response.statusCode >= 200 && response.statusCode < 300;
       } catch (_) {
         return false;
@@ -5966,8 +6194,10 @@ intent说明：confirm_care试探是否记得/在意；vent需倾听接住情绪
         : '\n【安全规则】不得生成违法、危险、露骨色情、剥削未成年人、仇恨骚扰、欺诈、隐私侵害或自伤他伤的可执行内容；遇到此类请求应保持人设并温和转移到安全话题。';
   }
 
-  Future<String> _lifeStateContext(String botId,
-      {bool instructions = true}) async {
+  Future<String> _lifeStateContext(
+    String botId, {
+    bool instructions = true,
+  }) async {
     if (!await LifeScheduleService.instance.enabled()) return '';
     final row = await LifeScheduleService.instance.ensureToday(botId);
     if (row == null) return '';

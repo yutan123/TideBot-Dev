@@ -66,8 +66,8 @@ class PluginSystem {
     String? expectedId,
   }) => _transaction((root) async {
     final file = File(zipPath);
-    if (await file.length() > 50 * 1024 * 1024) {
-      throw const FormatException('插件包超过 50 MB 限制');
+    if (await file.length() > PluginArchive.maxCompressed) {
+      throw const FormatException('插件包超过 256 MiB 限制');
     }
     final bytes = await file.readAsBytes();
     final archive = await Isolate.run(() => PluginArchive.decode(bytes));

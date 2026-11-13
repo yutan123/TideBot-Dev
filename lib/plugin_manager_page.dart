@@ -140,29 +140,81 @@ class _PluginManagerPageState extends State<PluginManagerPage> {
   }
 
   Future<void> _remove(Map<String, dynamic> row) async {
+    final theme = TideTheme.of(context);
     final confirmed = await TideDialogs.show<bool>(
       context: context,
-      builder: (context) => TideDialogs.glassContent(
-        context: context,
-        children: [
-          Text('删除插件', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 12),
-          Text('卸载“${row['name']}”并删除其文件、配置和私有数据？'),
-          const SizedBox(height: 18),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('取消'),
+      builder: (dialogContext) => TideDialogSurface(
+        backgroundColor: Colors.transparent,
+        contentPadding: EdgeInsets.zero,
+        child: TideDialogs.glassContent(
+          context: dialogContext,
+          maxWidth: 0.84,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF3B30).withValues(alpha: .12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.delete_outline_rounded,
+                    color: Color(0xFFFF3B30),
+                    size: 21,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    '删除插件',
+                    style: TextStyle(
+                      color: theme.textStrong,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      fontFamily: 'TideFont',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Text(
+              '确定卸载“${row['name']}”？其文件、配置和私有数据都会被删除。',
+              style: TextStyle(
+                color: theme.textWeak,
+                height: 1.5,
+                fontSize: 13,
+                fontFamily: 'TideFont',
               ),
-              FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('删除'),
-              ),
-            ],
-          ),
-        ],
+            ),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: Text('取消', style: TextStyle(color: theme.textWeak)),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF3B30),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                    minimumSize: const Size(0, 42),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  onPressed: () => Navigator.pop(dialogContext, true),
+                  child: const Text('删除'),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
     if (confirmed == true && mounted)
@@ -212,7 +264,7 @@ class _PluginManagerPageState extends State<PluginManagerPage> {
         ),
       ),
       child: Icon(
-        Icons.extension_rounded,
+        Icons.power_rounded,
         size: size * .5,
         color: theme.primary,
       ),
@@ -384,7 +436,7 @@ class _PluginManagerPageState extends State<PluginManagerPage> {
         color: theme.surface,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(
-          color: theme.border.withValues(alpha: .45),
+          color: theme.primary.withValues(alpha: .45),
           width: .7,
         ),
         boxShadow: [

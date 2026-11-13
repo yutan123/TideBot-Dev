@@ -104,16 +104,15 @@ class _PendingExpression {
   Map<String, dynamic> toMessage({
     required String botId,
     required int timestamp,
-  }) =>
-      {
-        'id': '${type}_$timestamp',
-        'bot_id': botId,
-        'role': 'user',
-        'type': type,
-        'content': name,
-        'file_path': path,
-        'timestamp': timestamp,
-      };
+  }) => {
+    'id': '${type}_$timestamp',
+    'bot_id': botId,
+    'role': 'user',
+    'type': type,
+    'content': name,
+    'file_path': path,
+    'timestamp': timestamp,
+  };
 }
 
 final _emojiCategoryIcons = <String, (IconData, String)>{
@@ -128,8 +127,11 @@ final _emojiCategoryIcons = <String, (IconData, String)>{
 };
 
 class _StableLinkPreviewCard extends StatefulWidget {
-  const _StableLinkPreviewCard(
-      {super.key, required this.url, required this.isUser});
+  const _StableLinkPreviewCard({
+    super.key,
+    required this.url,
+    required this.isUser,
+  });
   final String url;
   final bool isUser;
 
@@ -174,28 +176,38 @@ class _StableLinkPreviewCardState extends State<_StableLinkPreviewCard> {
 
   Widget _previewLoading(TideTheme theme) {
     return Container(
-      constraints:
-          BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * .75),
+      constraints: BoxConstraints(
+        maxWidth: MediaQuery.sizeOf(context).width * .75,
+      ),
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: theme.buttonSecondary,
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Row(children: [
-        SizedBox(
+      child: Row(
+        children: [
+          SizedBox(
             width: 16,
             height: 16,
             child: CircularProgressIndicator(
-                strokeWidth: 2, color: theme.textWeak)),
-        const SizedBox(width: 12),
-        Expanded(
-            child: Text('正在加载链接预览...',
-                style: TextStyle(
-                    fontSize: 12,
-                    color: theme.textWeak,
-                    fontFamily: 'TideFont'))),
-      ]),
+              strokeWidth: 2,
+              color: theme.textWeak,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              '正在加载链接预览...',
+              style: TextStyle(
+                fontSize: 12,
+                color: theme.textWeak,
+                fontFamily: 'TideFont',
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -356,8 +368,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   }
 
   void _refreshTypingState() {
-    final active =
-        ChatTypingState.instance.isTyping(_bot['id']?.toString() ?? '');
+    final active = ChatTypingState.instance.isTyping(
+      _bot['id']?.toString() ?? '',
+    );
     if (mounted && _typing != active) setState(() => _typing = active);
   }
 
@@ -380,7 +393,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     _lastComposing = value.composing;
     if (changed) {
       _messageDebounce.inputChanged(
-          hasText: value.text.isNotEmpty, now: _debounceClock.elapsed);
+        hasText: value.text.isNotEmpty,
+        now: _debounceClock.elapsed,
+      );
     }
     if (mounted) setState(() => _hasText = value.text.isNotEmpty);
   }
@@ -499,8 +514,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     // Persistence events arrive before sendMessage returns its final segments.
     // Foreground replies belong to the display queue until it finishes.
     if (_loading && row['role'] == 'assistant') return;
-    final index =
-        _msgs.indexWhere((message) => message['id']?.toString() == id);
+    final index = _msgs.indexWhere(
+      (message) => message['id']?.toString() == id,
+    );
     if (index < 0 && event.type != ChatEventType.inserted) return;
     setState(() {
       if (index >= 0) {
@@ -596,8 +612,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       if (context == null) {
         // ListView builds lazily. Move toward the target's reverse-list index,
         // then retry after that range has been laid out.
-        final messageIndex =
-            _msgs.indexWhere((message) => message['id']?.toString() == id);
+        final messageIndex = _msgs.indexWhere(
+          (message) => message['id']?.toString() == id,
+        );
         if (messageIndex < 0 ||
             !_scrollC.hasClients ||
             _initialMessageLocateAttempts >= 2) {
@@ -655,11 +672,13 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       if (!_showEmojiPanel && !_emojiPanelMounted) return;
       _emojiPanelCtrl.stop();
       setState(() => _showEmojiPanel = false);
-      unawaited(_emojiPanelCtrl.reverse().whenComplete(() {
-        if (mounted && !_showEmojiPanel && _emojiPanelCtrl.isDismissed) {
-          setState(() => _emojiPanelMounted = false);
-        }
-      }));
+      unawaited(
+        _emojiPanelCtrl.reverse().whenComplete(() {
+          if (mounted && !_showEmojiPanel && _emojiPanelCtrl.isDismissed) {
+            setState(() => _emojiPanelMounted = false);
+          }
+        }),
+      );
     }
     _scrollDown(animated: false);
   }
@@ -737,18 +756,21 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     var totalMs = baseMs;
     final enabled = await db.getKV('random_reply_delay_enabled') == 'true';
     if (enabled) {
-      var minS = int.tryParse(
+      var minS =
+          int.tryParse(
             await db.getKV('random_reply_delay_min_seconds') ?? '',
           ) ??
           0;
-      var maxS = int.tryParse(
+      var maxS =
+          int.tryParse(
             await db.getKV('random_reply_delay_max_seconds') ?? '',
           ) ??
           2;
       final extraMin = (minS.clamp(0, 60)) * 1000;
       var extraMax = (maxS.clamp(minS, 60)) * 1000;
       if (extraMax < extraMin) extraMax = extraMin;
-      final extraDelay = extraMin +
+      final extraDelay =
+          extraMin +
           DateTime.now().microsecond.remainder(extraMax - extraMin + 1);
       totalMs += extraDelay;
     }
@@ -768,8 +790,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     final botId = _bot['id']?.toString() ?? '';
     if (botId.isEmpty) return;
     final db = await DBManager().database;
-    await db
-        .transaction((txn) => ProactiveRequestGate.userActivity(txn, botId));
+    await db.transaction(
+      (txn) => ProactiveRequestGate.userActivity(txn, botId),
+    );
   }
 
   // 手机操控确认流程已移除。
@@ -836,17 +859,19 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     try {
       final raw = await rootBundle.loadString('assets/emojitwo/emoji.json');
       final data = jsonDecode(raw) as Map<String, dynamic>;
-      final chineseNames = jsonDecode(
-              await rootBundle.loadString('assets/emojitwo/zh_names.json'))
-          as Map<String, dynamic>;
+      final chineseNames =
+          jsonDecode(
+                await rootBundle.loadString('assets/emojitwo/zh_names.json'),
+              )
+              as Map<String, dynamic>;
       final catalog = <_EmojiAsset>[];
       data.forEach((code, value) {
         final entry = value as Map<String, dynamic>;
         final category = entry['category']?.toString() ?? '';
         if (!_emojiCategoryIcons.containsKey(category)) return;
         final asset = 'assets/emojitwo/$code.png';
-        final codePoints =
-            (entry['code_points'] as Map?)?.cast<String, dynamic>();
+        final codePoints = (entry['code_points'] as Map?)
+            ?.cast<String, dynamic>();
         final baseCode = codePoints?['base']?.toString() ?? code;
         final glyph = String.fromCharCodes(
           baseCode
@@ -857,13 +882,16 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         final name = chineseNames[code]?.toString().trim() ?? '';
         if (name.isEmpty) throw FormatException('表情缺少中文名称：$code');
         if (glyph.isNotEmpty) _emojiNamesByGlyph[glyph] = name;
-        catalog.add(_EmojiAsset(
-          asset: asset,
-          category: category,
-          name: name,
-          glyph: glyph,
-          order: int.tryParse(entry['emoji_order']?.toString() ?? '') ?? 99999,
-        ));
+        catalog.add(
+          _EmojiAsset(
+            asset: asset,
+            category: category,
+            name: name,
+            glyph: glyph,
+            order:
+                int.tryParse(entry['emoji_order']?.toString() ?? '') ?? 99999,
+          ),
+        );
       });
       catalog.sort((a, b) => a.order.compareTo(b.order));
       if (mounted) setState(() => _emojiCatalog = catalog);
@@ -935,9 +963,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       final next = text.replaceRange(offset, end, emoji.glyph);
       _msgC.value = TextEditingValue(
         text: next,
-        selection: TextSelection.collapsed(
-          offset: offset + emoji.glyph.length,
-        ),
+        selection: TextSelection.collapsed(offset: offset + emoji.glyph.length),
       );
       _setEmojiPanel(false);
       return;
@@ -1013,72 +1039,76 @@ class _ChatRoomPageState extends State<ChatRoomPage>
               Expanded(
                 child: _emojiTab == 0
                     ? _emojiCatalogLoading
-                        ? Center(
-                            child:
-                                CircularProgressIndicator(color: theme.primary))
-                        : GridView.builder(
-                            padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                            gridDelegate:
-                                const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 7,
+                          ? Center(
+                              child: CircularProgressIndicator(
+                                color: theme.primary,
+                              ),
+                            )
+                          : GridView.builder(
+                              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: 7,
+                                    mainAxisSpacing: 8,
+                                    crossAxisSpacing: 8,
+                                  ),
+                              itemCount: items.length,
+                              itemBuilder: (_, index) {
+                                final emoji = items[index];
+                                return Tooltip(
+                                  message: emoji.name,
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(6),
+                                    onTap: () => _selectEmoji(emoji),
+                                    child: Text(
+                                      emoji.glyph.isEmpty
+                                          ? emoji.name
+                                          : emoji.glyph,
+                                      style: const TextStyle(fontSize: 25),
+                                    ),
+                                  ),
+                                );
+                              },
+                            )
+                    : !_stickersLoaded
+                    ? Center(
+                        child: CircularProgressIndicator(color: theme.primary),
+                      )
+                    : _stickers.isEmpty
+                    ? Center(
+                        child: Text(
+                          '暂无我的表情',
+                          style: TextStyle(
+                            color: theme.textWeak,
+                            fontFamily: 'TideFont',
+                          ),
+                        ),
+                      )
+                    : GridView.builder(
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 5,
                               mainAxisSpacing: 8,
                               crossAxisSpacing: 8,
                             ),
-                            itemCount: items.length,
-                            itemBuilder: (_, index) {
-                              final emoji = items[index];
-                              return Tooltip(
-                                message: emoji.name,
-                                child: InkWell(
-                                  borderRadius: BorderRadius.circular(6),
-                                  onTap: () => _selectEmoji(emoji),
-                                  child: Text(
-                                    emoji.glyph.isEmpty
-                                        ? emoji.name
-                                        : emoji.glyph,
-                                    style: const TextStyle(fontSize: 25),
-                                  ),
-                                ),
-                              );
-                            },
-                          )
-                    : !_stickersLoaded
-                        ? Center(
-                            child:
-                                CircularProgressIndicator(color: theme.primary))
-                        : _stickers.isEmpty
-                            ? Center(
-                                child: Text('暂无我的表情',
-                                    style: TextStyle(
-                                        color: theme.textWeak,
-                                        fontFamily: 'TideFont')))
-                            : GridView.builder(
-                                padding:
-                                    const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                                gridDelegate:
-                                    const SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: 5,
-                                  mainAxisSpacing: 8,
-                                  crossAxisSpacing: 8,
-                                ),
-                                itemCount: _stickers.length,
-                                itemBuilder: (_, index) {
-                                  final sticker = _stickers[index];
-                                  final path =
-                                      sticker['file_path']?.toString() ?? '';
-                                  return InkWell(
-                                    borderRadius: BorderRadius.circular(6),
-                                    onTap: () => _selectSticker(sticker),
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(6),
-                                      child: _localStickerPreview(
-                                        path,
-                                        fit: BoxFit.cover,
-                                      ),
-                                    ),
-                                  );
-                                },
+                        itemCount: _stickers.length,
+                        itemBuilder: (_, index) {
+                          final sticker = _stickers[index];
+                          final path = sticker['file_path']?.toString() ?? '';
+                          return InkWell(
+                            borderRadius: BorderRadius.circular(6),
+                            onTap: () => _selectSticker(sticker),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(6),
+                              child: _localStickerPreview(
+                                path,
+                                fit: BoxFit.cover,
                               ),
+                            ),
+                          );
+                        },
+                      ),
               ),
               if (_emojiTab == 0)
                 SizedBox(
@@ -1087,19 +1117,20 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                     scrollDirection: Axis.horizontal,
                     physics: const BouncingScrollPhysics(),
                     padding: const EdgeInsets.symmetric(horizontal: 4),
-                    children: _emojiCategoryIcons.entries.map((entry) {
-                      final selected = _emojiCategory == entry.key;
-                      return IconButton(
-                        tooltip: entry.value.$2,
-                        onPressed: () => setState(
-                          () => _emojiCategory = entry.key,
-                        ),
-                        icon: Icon(
-                          entry.value.$1,
-                          color: selected ? theme.primary : theme.iconMuted,
-                        ),
-                      );
-                    }).toList(growable: false),
+                    children: _emojiCategoryIcons.entries
+                        .map((entry) {
+                          final selected = _emojiCategory == entry.key;
+                          return IconButton(
+                            tooltip: entry.value.$2,
+                            onPressed: () =>
+                                setState(() => _emojiCategory = entry.key),
+                            icon: Icon(
+                              entry.value.$1,
+                              color: selected ? theme.primary : theme.iconMuted,
+                            ),
+                          );
+                        })
+                        .toList(growable: false),
                   ),
                 ),
             ],
@@ -1137,29 +1168,37 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       var mediaContext = inputMediaContext;
 
       images = await Future.wait(
-          (images ?? (noUserBubble ? <String>[] : _pendingImages))
-              .map(MediaStorageService.instance.resolve));
+        (images ?? (noUserBubble ? <String>[] : _pendingImages)).map(
+          MediaStorageService.instance.resolve,
+        ),
+      );
       documents = await Future.wait(
-          (documents ?? (noUserBubble ? <String>[] : _pendingDocuments))
-              .map(MediaStorageService.instance.resolve));
+        (documents ?? (noUserBubble ? <String>[] : _pendingDocuments)).map(
+          MediaStorageService.instance.resolve,
+        ),
+      );
       if (audioPath != null)
         audioPath = await MediaStorageService.instance.resolve(audioPath);
       if (batchedMessages != null) {
-        batchedMessages =
-            await Future.wait(batchedMessages.map((message) async {
-          final copy = Map<String, dynamic>.from(message);
-          if (copy['file_path'] is String)
-            copy['file_path'] = await MediaStorageService.instance
-                .resolve(copy['file_path'] as String);
-          return copy;
-        }));
+        batchedMessages = await Future.wait(
+          batchedMessages.map((message) async {
+            final copy = Map<String, dynamic>.from(message);
+            if (copy['file_path'] is String)
+              copy['file_path'] = await MediaStorageService.instance.resolve(
+                copy['file_path'] as String,
+              );
+            return copy;
+          }),
+        );
       }
 
       var text = queuedText ?? (noUserBubble ? '' : _msgC.text.trim());
       final preparedVideos = <PreparedVideoInput>[];
       final unregisteredSharedVideos = <String>{};
-      AppLogService.instance.add('AI_TRACE',
-          '发送入口 bot=${_bot['id']} loading=$_loading queued=$_queued generation=$_requestGen');
+      AppLogService.instance.add(
+        'AI_TRACE',
+        '发送入口 bot=${_bot['id']} loading=$_loading queued=$_queued generation=$_requestGen',
+      );
 
       images = List<String>.from(images);
       documents = List<String>.from(documents);
@@ -1196,7 +1235,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       }
       final botId = _bot['id']?.toString() ?? '';
       final now = DateTime.now().millisecondsSinceEpoch;
-      final userMessages = batchedMessages ??
+      final userMessages =
+          batchedMessages ??
           _buildAttachmentMessages(
             botId: botId,
             timestamp: now,
@@ -1205,8 +1245,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
             documents: documents,
           );
       if (expression != null) {
-        userMessages
-            .add(expression.toMessage(botId: botId, timestamp: now + 1));
+        userMessages.add(
+          expression.toMessage(botId: botId, timestamp: now + 1),
+        );
         final expressionContext = expression.modelContext;
         mediaContext = mediaContext == null
             ? expressionContext
@@ -1229,8 +1270,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         if (_queued) {
           // 已有待重发队列，合并进同一批文本，避免产生多余第三次请求。
           final prev = _queuedText;
-          _queuedText =
-              text.isEmpty ? prev : (prev.isEmpty ? text : '$prev\n$text');
+          _queuedText = text.isEmpty
+              ? prev
+              : (prev.isEmpty ? text : '$prev\n$text');
         } else {
           _queuedText = text;
         }
@@ -1239,7 +1281,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         if (mediaContext != null) {
           _queuedMediaContext = [
             if (_queuedMediaContext != null) _queuedMediaContext,
-            mediaContext
+            mediaContext,
           ].join('\n');
         }
         _queuedMessages.addAll(userMessages);
@@ -1266,16 +1308,18 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         try {
           for (final queuedMessage
               in noUserBubble ? <Map<String, dynamic>>[] : queuedMessages) {
-            await MessageDeliveryService.instance.insert({
-              'id': queuedMessage['id'],
-              'bot_id': botId,
-              'role': 'user',
-              'type': queuedMessage['type'],
-              'content': queuedMessage['content'],
-              'file_path': queuedMessage['file_path'],
-              'mood': null,
-              'timestamp': queuedMessage['timestamp'],
-            }).timeout(const Duration(seconds: 12));
+            await MessageDeliveryService.instance
+                .insert({
+                  'id': queuedMessage['id'],
+                  'bot_id': botId,
+                  'role': 'user',
+                  'type': queuedMessage['type'],
+                  'content': queuedMessage['content'],
+                  'file_path': queuedMessage['file_path'],
+                  'mood': null,
+                  'timestamp': queuedMessage['timestamp'],
+                })
+                .timeout(const Duration(seconds: 12));
           }
         } catch (e) {
           debugPrint('[send] persist queued user message failed: $e');
@@ -1324,16 +1368,18 @@ class _ChatRoomPageState extends State<ChatRoomPage>
             // chat_history 的真实字段是 type / file_path，不能把 UI 专用 image
             // 字段直接写库；否则 SQLite 会因“no column named image”静默失败。
             for (final userMessage in userMessages) {
-              await MessageDeliveryService.instance.insert({
-                'id': userMessage['id'],
-                'bot_id': botId,
-                'role': 'user',
-                'type': userMessage['type'],
-                'content': userMessage['content'],
-                'file_path': userMessage['file_path'],
-                'mood': null,
-                'timestamp': userMessage['timestamp'],
-              }).timeout(const Duration(seconds: 12));
+              await MessageDeliveryService.instance
+                  .insert({
+                    'id': userMessage['id'],
+                    'bot_id': botId,
+                    'role': 'user',
+                    'type': userMessage['type'],
+                    'content': userMessage['content'],
+                    'file_path': userMessage['file_path'],
+                    'mood': null,
+                    'timestamp': userMessage['timestamp'],
+                  })
+                  .timeout(const Duration(seconds: 12));
             }
           } catch (e) {
             debugPrint('[send] persist user message failed: $e');
@@ -1341,13 +1387,15 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         }
         await _waitForMessagePause();
         if (_queued) {
-          text =
-              [text, _queuedText].where((part) => part.isNotEmpty).join('\n');
+          text = [
+            text,
+            _queuedText,
+          ].where((part) => part.isNotEmpty).join('\n');
           images.addAll(_queuedImages);
           documents.addAll(_queuedDocuments);
           mediaContext = [
             if (mediaContext != null) mediaContext,
-            if (_queuedMediaContext != null) _queuedMediaContext
+            if (_queuedMediaContext != null) _queuedMediaContext,
           ].join('\n');
           userMessages.addAll(_queuedMessages);
           audioPath = _queuedAudioPath ?? audioPath;
@@ -1364,8 +1412,10 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         _messageDebounce.reset();
         _activeRequestToken = AICancellationToken();
         _setTypingState(true);
-        AppLogService.instance.add('AI_TRACE',
-            '连续消息结算 bot=$botId messages=${userMessages.length} generation=$myGen');
+        AppLogService.instance.add(
+          'AI_TRACE',
+          '连续消息结算 bot=$botId messages=${userMessages.length} generation=$myGen',
+        );
         final cm = _bot['chat_model']?.toString().trim() ?? '';
         if (cm.isEmpty) {
           final providers = await DBManager().queryChatProviders();
@@ -1383,13 +1433,16 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         for (final link in resolver.extractLinks(text)) {
           if (myGen != _requestGen) return;
           try {
-            final result =
-                await resolver.parse(link).timeout(const Duration(seconds: 45));
+            final result = await resolver
+                .parse(link)
+                .timeout(const Duration(seconds: 45));
             if (result == null) continue;
             if (result.videoUrl != null) {
               final temporaryPath = await resolver.downloadVideo(
-                  result.videoUrl!, result.headers,
-                  audioUrl: result.audioUrl);
+                result.videoUrl!,
+                result.headers,
+                audioUrl: result.audioUrl,
+              );
               if (temporaryPath == null) {
                 throw StateError('视频下载失败');
               }
@@ -1397,8 +1450,12 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                 final directory = await getApplicationDocumentsDirectory();
                 final folder = Directory('${directory.path}/chat_media/videos');
                 await folder.create(recursive: true);
-                final saved = await File(temporaryPath).copy(p.join(folder.path,
-                    '${DateTime.now().microsecondsSinceEpoch}_share.mp4'));
+                final saved = await File(temporaryPath).copy(
+                  p.join(
+                    folder.path,
+                    '${DateTime.now().microsecondsSinceEpoch}_share.mp4',
+                  ),
+                );
                 unregisteredSharedVideos.add(saved.path);
                 documents.add(saved.path);
                 sharedVideos[saved.path] = link;
@@ -1424,7 +1481,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
             if (result.title.isNotEmpty ||
                 result.description?.isNotEmpty == true) {
               documentNotices.add(
-                  '分享内容（$link）：${result.title}\n${result.description ?? ''}');
+                '分享内容（$link）：${result.title}\n${result.description ?? ''}',
+              );
             }
           } catch (error) {
             AppLogService.instance.add('PLATFORM_MEDIA', '$link 处理失败：$error');
@@ -1435,56 +1493,69 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         for (final path in documents) {
           if (isVideoAttachment(path)) {
             final prefs = await SharedPreferences.getInstance();
-            final modelId = (prefs.getString('video_model_$botId') ??
-                    _bot['video_model']?.toString() ??
-                    '')
-                .trim();
+            final modelId =
+                (prefs.getString('video_model_$botId') ??
+                        _bot['video_model']?.toString() ??
+                        '')
+                    .trim();
             try {
-              AppLogService.instance.add('VIDEO',
-                  '开始处理视频 mode=${modelId.isEmpty ? 'frames_audio' : 'original'}');
+              AppLogService.instance.add(
+                'VIDEO',
+                '开始处理视频 mode=${modelId.isEmpty ? 'frames_audio' : 'original'}',
+              );
               final videoId = 'VID${DateTime.now().microsecondsSinceEpoch}';
               final prepared = await prepareVideoInput(
-                  path: path,
-                  botId: botId,
-                  modelId: modelId,
-                  userText: text,
-                  videoId: videoId);
+                path: path,
+                botId: botId,
+                modelId: modelId,
+                userText: text,
+                videoId: videoId,
+              );
               preparedVideos.add(prepared);
               final history = prefs.getStringList('video_history_$botId') ?? [];
-              history.add(json.encode({
-                'id': videoId,
-                'timestamp': DateTime.now().millisecondsSinceEpoch,
-                'duration':
-                    prepared.temporaryMedia?.duration ?? prepared.duration,
-                'analysis_context': prepared.context,
-                'frame_paths': prepared.frames,
-                'original_video_path': path,
-                'chat_attachment': !sharedVideos.containsKey(path),
-                if (sharedVideos.containsKey(path))
-                  'platform_link': sharedVideos[path],
-                'is_preview': prepared.temporaryMedia?.isPreview ?? false,
-              }));
+              history.add(
+                json.encode({
+                  'id': videoId,
+                  'timestamp': DateTime.now().millisecondsSinceEpoch,
+                  'duration':
+                      prepared.temporaryMedia?.duration ?? prepared.duration,
+                  'analysis_context': prepared.context,
+                  'frame_paths': prepared.frames,
+                  'original_video_path': path,
+                  'chat_attachment': !sharedVideos.containsKey(path),
+                  if (sharedVideos.containsKey(path))
+                    'platform_link': sharedVideos[path],
+                  'is_preview': prepared.temporaryMedia?.isPreview ?? false,
+                }),
+              );
               if (history.length > 50)
                 history.removeRange(0, history.length - 50);
               await prefs.setStringList('video_history_$botId', history);
-              AppLogService.instance.add('VIDEO',
-                  '视频上下文已准备 video=$videoId characters=${prepared.context.length} frames=${prepared.frames.length}');
+              AppLogService.instance.add(
+                'VIDEO',
+                '视频上下文已准备 video=$videoId characters=${prepared.context.length} frames=${prepared.frames.length}',
+              );
               unregisteredSharedVideos.remove(path);
-              documentNotices.add([
-                '[视频编号：$videoId]',
-                if (prepared.frames.isNotEmpty)
-                  videoFrameSourceContext(videoId,
+              documentNotices.add(
+                [
+                  '[视频编号：$videoId]',
+                  if (prepared.frames.isNotEmpty)
+                    videoFrameSourceContext(
+                      videoId,
                       firstImageNumber: images.length + framePaths.length + 1,
-                      frameCount: prepared.frames.length),
-                prepared.context,
-              ].join('\n'));
+                      frameCount: prepared.frames.length,
+                    ),
+                  prepared.context,
+                ].join('\n'),
+              );
               framePaths.addAll(prepared.frames);
             } catch (error) {
               AppLogService.instance.add('VIDEO', '视频处理失败：$error');
               if (!sharedVideos.containsKey(path)) rethrow;
               AppLogService.instance.add('PLATFORM_MEDIA', '分享视频分析失败：$error');
-              documentNotices
-                  .add('分享链接 ${sharedVideos[path]} 的视频无法分析，不得声称已观看视频。');
+              documentNotices.add(
+                '分享链接 ${sharedVideos[path]} 的视频无法分析，不得声称已观看视频。',
+              );
             }
           } else {
             documentNotices.add(await MediaPreprocessor().documentText(path));
@@ -1492,56 +1563,70 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         }
         final contextParts = [
           if (mediaContext != null) mediaContext,
-          ...documentNotices
+          ...documentNotices,
         ];
-        final preparedContext =
-            contextParts.isEmpty ? null : contextParts.join('\n\n');
+        final preparedContext = contextParts.isEmpty
+            ? null
+            : contextParts.join('\n\n');
         final modelText = preparedContext == null
             ? _emojiToModelText(text)
             : (text.isEmpty
-                ? preparedContext
-                : '${_emojiToModelText(text)}\n$preparedContext');
+                  ? preparedContext
+                  : '${_emojiToModelText(text)}\n$preparedContext');
 
         if (myGen != _requestGen) {
-          AppLogService.instance.add('AI_TRACE',
-              '媒体处理后停止发送 mounted=$mounted generation=$myGen current=$_requestGen queued=$_queued');
+          AppLogService.instance.add(
+            'AI_TRACE',
+            '媒体处理后停止发送 mounted=$mounted generation=$myGen current=$_requestGen queued=$_queued',
+          );
           return;
         }
-        AppLogService.instance.add('AI_TRACE',
-            '媒体上下文交给聊天模型 bot=$botId videos=${preparedVideos.length} characters=${modelText.length}');
+        AppLogService.instance.add(
+          'AI_TRACE',
+          '媒体上下文交给聊天模型 bot=$botId videos=${preparedVideos.length} characters=${modelText.length}',
+        );
         // AIManager reads persisted, role-typed history. Partially revealed UI
         // rows must never be reused as a model transcript.
         debugPrint('[send] request start bot=$botId model=$cm');
         final db = DBManager();
         final streamEnabled = (await db.getKV('streaming_output')) != 'false';
         final streamSpeed =
-            (int.tryParse(await db.getKV('streaming_speed') ?? '') ?? 50)
-                .clamp(1, 100);
+            (int.tryParse(await db.getKV('streaming_speed') ?? '') ?? 50).clamp(
+              1,
+              100,
+            );
         // Remote provider cold starts and tool calls can legitimately exceed 30 seconds.
         const requestTimeout = Duration(minutes: 5);
         final requestToken = _activeRequestToken!;
         final result = await AIManager()
             .sendMessage(
-          botId: botId,
-          text: modelText,
-          imagePaths: [...images, ...framePaths],
-          audioPath: audioPath,
-          currentMessageIds:
-              userMessages.map((row) => row['id'].toString()).toSet(),
-          beginResponseCommit: () {
-            if (myGen != _requestGen || requestToken.isCancelled) return false;
-            return turn.beginCommit();
-          },
-          forceSingleReply: forceSingleReply,
-          notifyResponse: true,
-          useJarvis: (await DBManager().getKV('jarvis_enabled')) == 'true',
-          cancellationToken: requestToken,
-          // Display timing is client-owned, including non-SSE providers and tools.
-        )
-            .timeout(requestTimeout, onTimeout: () {
-          requestToken.cancel();
-          throw TimeoutException('请求超过5分钟，已停止');
-        }).whenComplete(() => _setTypingState(false));
+              botId: botId,
+              text: modelText,
+              imagePaths: [...images, ...framePaths],
+              audioPath: audioPath,
+              currentMessageIds: userMessages
+                  .map((row) => row['id'].toString())
+                  .toSet(),
+              beginResponseCommit: () {
+                if (myGen != _requestGen || requestToken.isCancelled)
+                  return false;
+                return turn.beginCommit();
+              },
+              forceSingleReply: forceSingleReply,
+              notifyResponse: true,
+              useJarvis: (await DBManager().getKV('jarvis_enabled')) == 'true',
+              cancellationToken: requestToken,
+              deferPluginDelivery: true,
+              // Display timing is client-owned, including non-SSE providers and tools.
+            )
+            .timeout(
+              requestTimeout,
+              onTimeout: () {
+                requestToken.cancel();
+                throw TimeoutException('请求超过5分钟，已停止');
+              },
+            )
+            .whenComplete(() => _setTypingState(false));
 
         if (myGen != _requestGen && !turn.isCommitted) return;
         if (result['success'] == true) {
@@ -1604,7 +1689,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           if (!mounted || myGen != _requestGen) break;
           final row = persisted[index];
           final fullContent = row['content']?.toString() ?? '';
-          final reveal = streamEnabled &&
+          final reveal =
+              streamEnabled &&
               (row['type'] == 'text' || row['type'] == 'inner_thought') &&
               fullContent.isNotEmpty;
           if (reveal) {
@@ -1631,8 +1717,10 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           });
           _scrollDown();
           if (reveal) {
-            await for (final content
-                in chatStreamText(fullContent, streamSpeed)) {
+            await for (final content in chatStreamText(
+              fullContent,
+              streamSpeed,
+            )) {
               if (!mounted || myGen != _requestGen) break;
               setState(() => row['content'] = content);
               _scrollDown(animated: false);
@@ -1664,8 +1752,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         final errorText = e is TimeoutException
             ? '请求超过5分钟，已停止'
             : e is StateError
-                ? e.message.toString()
-                : '处理或请求失败：$e';
+            ? e.message.toString()
+            : '处理或请求失败：$e';
         if (mounted) GlobalNotice.show(errorText);
         final errorLog = '${e.toString()}\n${st.toString()}';
         await _markTurnFailed(
@@ -1689,9 +1777,12 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         }
         // Release synchronously, even if UI cleanup throws. No old request may
         // clear a lock owned by the queued request after the handoff.
+        await MessageDeliveryService.instance.flushPluginMessages(botId);
         _loading = false;
         AppLogService.instance.add(
-            'AI_TRACE', '发送流程释放 bot=$botId generation=$myGen queued=$_queued');
+          'AI_TRACE',
+          '发送流程释放 bot=$botId generation=$myGen queued=$_queued',
+        );
         for (final message in _msgs) {
           message.remove('is_streaming');
         }
@@ -1701,14 +1792,15 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         _activeRequestToken = null;
         if (_queued && myGen != _requestGen && !turn.isCommitted) {
           // Replay the complete uncommitted turn, including its original photos.
-          _queuedText = [batchText, _queuedText]
-              .where((part) => part.isNotEmpty)
-              .join('\n');
+          _queuedText = [
+            batchText,
+            _queuedText,
+          ].where((part) => part.isNotEmpty).join('\n');
           _queuedImages.insertAll(0, batchImages);
           _queuedDocuments.insertAll(0, batchDocuments);
           _queuedMediaContext = [
             if (batchContext != null) batchContext,
-            if (_queuedMediaContext != null) _queuedMediaContext
+            if (_queuedMediaContext != null) _queuedMediaContext,
           ].join('\n');
           _queuedMessages.insertAll(0, userMessages);
           _queuedAudioPath ??= audioPath;
@@ -1756,7 +1848,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       final id = message['id'].toString();
       final rows = [
         message,
-        ..._msgs.where((row) => row['id'].toString() == id)
+        ..._msgs.where((row) => row['id'].toString() == id),
       ];
       for (final row in rows) {
         row['error_log'] = errorLog;
@@ -1793,7 +1885,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   Future<void> _retryMessage(Map<String, dynamic> message) async {
     if (_loading) return;
     if (message['type'] == 'audio') {
-      final path = message['audio']?.toString() ??
+      final path =
+          message['audio']?.toString() ??
           message['file_path']?.toString() ??
           '';
       if (path.isEmpty) {
@@ -1885,7 +1978,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     return [
       for (var index = 0; index < attachments.length; index++)
         {
-          'id': 'm_$timestamp'
+          'id':
+              'm_$timestamp'
               '_$index',
           'bot_id': botId,
           'role': 'user',
@@ -1924,13 +2018,15 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         final transcript = savedTranscript.isNotEmpty
             ? savedTranscript
             : await AIManager()
-                .transcribeAudio(botId: botId, audioPath: audioPath)
-                .timeout(const Duration(seconds: 50), onTimeout: () => null);
+                  .transcribeAudio(botId: botId, audioPath: audioPath)
+                  .timeout(const Duration(seconds: 50), onTimeout: () => null);
         if (transcript == null || transcript.trim().isEmpty) {
-          await _markTurnFailed([message],
-              errorLog: '语音转写失败或未配置可用的语音识别模型',
-              errorText: '语音未识别成功，请检查模型配置后重新发送',
-              errorCode: 'stt_failed');
+          await _markTurnFailed(
+            [message],
+            errorLog: '语音转写失败或未配置可用的语音识别模型',
+            errorText: '语音未识别成功，请检查模型配置后重新发送',
+            errorCode: 'stt_failed',
+          );
           if (mounted) GlobalNotice.show('语音未识别成功，可长按语音重新发送');
           return;
         }
@@ -1959,10 +2055,12 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         );
       } catch (error, stack) {
         AppLogService.instance.add('STT', '语音处理失败：$error\n$stack');
-        await _markTurnFailed([message],
-            errorLog: '$error\n$stack',
-            errorText: '语音处理失败，请重新发送',
-            errorCode: 'stt_failed');
+        await _markTurnFailed(
+          [message],
+          errorLog: '$error\n$stack',
+          errorText: '语音处理失败，请重新发送',
+          errorCode: 'stt_failed',
+        );
         if (mounted) GlobalNotice.show('语音处理失败，可长按语音重新发送');
       } finally {
         // Always release, including an early return/failed handoff to _send.
@@ -2002,17 +2100,19 @@ class _ChatRoomPageState extends State<ChatRoomPage>
             'timestamp': now,
           };
           try {
-            await MessageDeliveryService.instance.insert({
-              'id': m['id'],
-              'bot_id': m['bot_id'],
-              'role': 'user',
-              'type': 'audio',
-              'content': '',
-              'file_path': path,
-              'mood': null,
-              'duration': duration,
-              'timestamp': now,
-            }).timeout(const Duration(seconds: 5));
+            await MessageDeliveryService.instance
+                .insert({
+                  'id': m['id'],
+                  'bot_id': m['bot_id'],
+                  'role': 'user',
+                  'type': 'audio',
+                  'content': '',
+                  'file_path': path,
+                  'mood': null,
+                  'duration': duration,
+                  'timestamp': now,
+                })
+                .timeout(const Duration(seconds: 5));
           } catch (e) {
             debugPrint('[record] persist failed: $e');
           }
@@ -2067,8 +2167,10 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       final directory = await getApplicationDocumentsDirectory();
       final folder = Directory(p.join(directory.path, 'chat_media', 'audio'));
       await folder.create(recursive: true);
-      final destination = p.join(folder.path,
-          '${DateTime.now().microsecondsSinceEpoch}_${p.basename(path)}');
+      final destination = p.join(
+        folder.path,
+        '${DateTime.now().microsecondsSinceEpoch}_${p.basename(path)}',
+      );
       await File(path).copy(destination);
       path = destination;
     } catch (error) {
@@ -2089,17 +2191,19 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       'timestamp': now,
     };
     try {
-      await MessageDeliveryService.instance.insert({
-        'id': message['id'],
-        'bot_id': botId,
-        'role': 'user',
-        'type': 'audio',
-        'content': '',
-        'file_path': path,
-        'mood': null,
-        'duration': 0,
-        'timestamp': now,
-      }).timeout(const Duration(seconds: 5));
+      await MessageDeliveryService.instance
+          .insert({
+            'id': message['id'],
+            'bot_id': botId,
+            'role': 'user',
+            'type': 'audio',
+            'content': '',
+            'file_path': path,
+            'mood': null,
+            'duration': 0,
+            'timestamp': now,
+          })
+          .timeout(const Duration(seconds: 5));
       if (mounted) {
         setState(() => _msgs.add(message));
         _scrollDown();
@@ -2113,7 +2217,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     }
   }
 
-// ========== 选择图片/文件 ==========
+  // ========== 选择图片/文件 ==========
   void _pickMedia(BuildContext triggerContext) async {
     final r = await showTidePopover<String>(
       context: triggerContext,
@@ -2122,15 +2226,25 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         mainAxisSize: MainAxisSize.min,
         children: [
           TidePopoverItem(
-              icon: Icons.camera_alt_outlined, label: '相机', value: 'camera'),
+            icon: Icons.camera_alt_outlined,
+            label: '相机',
+            value: 'camera',
+          ),
           TidePopoverItem(
-              icon: Icons.image_outlined, label: '照片', value: 'img'),
+            icon: Icons.image_outlined,
+            label: '照片',
+            value: 'img',
+          ),
           TidePopoverItem(
-              icon: Icons.play_circle_outline_rounded,
-              label: '视频',
-              value: 'video'),
+            icon: Icons.play_circle_outline_rounded,
+            label: '视频',
+            value: 'video',
+          ),
           TidePopoverItem(
-              icon: Icons.attach_file_rounded, label: '文件', value: 'file'),
+            icon: Icons.attach_file_rounded,
+            label: '文件',
+            value: 'file',
+          ),
         ],
       ),
     );
@@ -2163,7 +2277,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         await Permission.storage.request();
       } catch (_) {}
       final fp = await FilePicker.platform.pickFiles(allowMultiple: true);
-      final paths = fp?.files
+      final paths =
+          fp?.files
               .map((file) => file.path)
               .whereType<String>()
               .where((path) => path.isNotEmpty)
@@ -2201,13 +2316,18 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       final directory = await getApplicationDocumentsDirectory();
       final folder = Directory('${directory.path}/chat_media/videos');
       await folder.create(recursive: true);
-      final destination = p.join(folder.path,
-          '${DateTime.now().microsecondsSinceEpoch}_${p.basename(video.path)}');
+      final destination = p.join(
+        folder.path,
+        '${DateTime.now().microsecondsSinceEpoch}_${p.basename(video.path)}',
+      );
       await File(video.path).copy(destination);
       if (!mounted) return;
       setState(() => _pendingDocuments.add(destination));
-      unawaited(VideoPosterService.load(destination)
-          .then<void>((_) {}, onError: (Object error, StackTrace stack) {}));
+      unawaited(
+        VideoPosterService.load(
+          destination,
+        ).then<void>((_) {}, onError: (Object error, StackTrace stack) {}),
+      );
     } catch (error) {
       if (mounted) GlobalNotice.show('添加视频失败：$error');
     }
@@ -2227,14 +2347,20 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       if (!await source.exists()) throw FileSystemException('所选视频不可访问', path);
       final destination = source.parent.path == folder.path
           ? path
-          : p.join(folder.path,
-              '${DateTime.now().microsecondsSinceEpoch}_${p.basename(path)}');
+          : p.join(
+              folder.path,
+              '${DateTime.now().microsecondsSinceEpoch}_${p.basename(path)}',
+            );
       if (destination != path) await source.copy(destination);
       stored.add(destination);
-      unawaited(VideoPosterService.load(destination).then<void>((_) {},
+      unawaited(
+        VideoPosterService.load(destination).then<void>(
+          (_) {},
           onError: (Object error, StackTrace stack) {
-        AppLogService.instance.add('VIDEO', '视频封面生成失败：$error');
-      }));
+            AppLogService.instance.add('VIDEO', '视频封面生成失败：$error');
+          },
+        ),
+      );
     }
     return stored;
   }
@@ -2523,22 +2649,27 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     final botId = _bot['id'] as String;
     // 当前选择（只读读取 DB，作为初始值；弹窗内实时状态交给 setSt 维护）
     // 聊天模型必须由用户明确选择；不能因为列表有 provider 就静默选中第一个。
-    String curChat = prefs.getString('chat_model_$botId') ??
+    String curChat =
+        prefs.getString('chat_model_$botId') ??
         ((_bot['chat_model'] as String?)?.trim() ?? '');
     String curBak = prefs.getString('backup_model_$botId') ?? '';
     String curVision = prefs.getString('vision_model_$botId') ?? '';
     String curImageGen = prefs.getString('image_gen_model_$botId') ?? '';
-    String curStt = prefs.getString('stt_model_$botId') ??
+    String curStt =
+        prefs.getString('stt_model_$botId') ??
         ((_bot['stt_model'] as String?)?.trim() ?? '');
-    String curVideo = prefs.getString('video_model_$botId') ??
+    String curVideo =
+        prefs.getString('video_model_$botId') ??
         ((_bot['video_model'] as String?)?.trim() ?? '');
     final jarvisOn = (await DBManager().getKV('jarvis_enabled')) == 'true';
     String curJarvis = prefs.getString('jarvis_model_$botId') ?? '';
-    String curTts = prefs.getString('tts_model_$botId') ??
+    String curTts =
+        prefs.getString('tts_model_$botId') ??
         ((_bot['tts_model'] as String?)?.isNotEmpty == true
             ? _bot['tts_model'] as String
             : '');
-    int curTok = prefs.getInt('max_token_$botId') ??
+    int curTok =
+        prefs.getInt('max_token_$botId') ??
         (_bot['max_tokens'] as int? ?? 10000);
 
     TideDialogs.show(
@@ -2601,12 +2732,15 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                         }),
                         if (jarvisOn) ...[
                           _mLabel('AI军师辅助模型'),
-                          _modelPicker(ctx, providers,
-                              curJarvis.isEmpty ? curChat : curJarvis,
-                              (v) async {
-                            curJarvis = v;
-                            await pickModel('jarvis_model_$botId', v);
-                          }),
+                          _modelPicker(
+                            ctx,
+                            providers,
+                            curJarvis.isEmpty ? curChat : curJarvis,
+                            (v) async {
+                              curJarvis = v;
+                              await pickModel('jarvis_model_$botId', v);
+                            },
+                          ),
                         ],
                         _mLabel('备用模型'),
                         _modelPicker(ctx, providers, curBak, (v) async {
@@ -2614,16 +2748,10 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                           await pickModel('backup_model_$botId', v);
                         }),
                         _mLabel('识图模型'),
-                        _modelPicker(
-                          ctx,
-                          providers,
-                          curVision,
-                          (v) async {
-                            curVision = v;
-                            await pickModel('vision_model_$botId', v);
-                          },
-                          includePrimaryVision: true,
-                        ),
+                        _modelPicker(ctx, providers, curVision, (v) async {
+                          curVision = v;
+                          await pickModel('vision_model_$botId', v);
+                        }, includePrimaryVision: true),
                         _mLabel('生图模型'),
                         _modelPicker(ctx, providers, curImageGen, (v) async {
                           curImageGen = v;
@@ -2873,9 +3001,12 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                 ListTile(
                   leading: const Icon(Icons.visibility_rounded),
                   title: Text(
-                      includePrimaryVideo ? '使用主模型解析' : '使用主模型识图（需要主模型支持识图）',
-                      style: const TextStyle(
-                          fontFamily: 'TideFont', fontSize: 14)),
+                    includePrimaryVideo ? '使用主模型解析' : '使用主模型识图（需要主模型支持识图）',
+                    style: const TextStyle(
+                      fontFamily: 'TideFont',
+                      fontSize: 14,
+                    ),
+                  ),
                   trailing: cur == '__use_primary_vision__'
                       ? Icon(Icons.check, color: TideTheme.of(ctx).primary)
                       : null,
@@ -2887,8 +3018,10 @@ class _ChatRoomPageState extends State<ChatRoomPage>
               if (includePrimaryStt)
                 ListTile(
                   leading: const Icon(Icons.mic_rounded),
-                  title: const Text('使用主模型识别（需要主模型支持语音）',
-                      style: TextStyle(fontFamily: 'TideFont', fontSize: 14)),
+                  title: const Text(
+                    '使用主模型识别（需要主模型支持语音）',
+                    style: TextStyle(fontFamily: 'TideFont', fontSize: 14),
+                  ),
                   trailing: cur == '__use_primary_stt__'
                       ? Icon(Icons.check, color: TideTheme.of(ctx).primary)
                       : null,
@@ -3165,7 +3298,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                       onChanged: !active || !knownDuration
                           ? null
                           : (v) =>
-                              _player.seek(Duration(milliseconds: v.round())),
+                                _player.seek(Duration(milliseconds: v.round())),
                       activeColor: foreground,
                       inactiveColor: muted,
                     ),
@@ -3233,8 +3366,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     const separator = '\n\n--- 通话原文 ---\n';
     final splitAt = content.indexOf(separator);
     final summary = splitAt < 0 ? content : content.substring(0, splitAt);
-    final transcript =
-        splitAt < 0 ? '' : content.substring(splitAt + separator.length);
+    final transcript = splitAt < 0
+        ? ''
+        : content.substring(splitAt + separator.length);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Material(
@@ -3245,43 +3379,40 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           onTap: failed
               ? null
               : () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => Scaffold(
+                  MaterialPageRoute(
+                    builder: (_) => Scaffold(
+                      backgroundColor: Colors.transparent,
+                      appBar: AppBar(
                         backgroundColor: Colors.transparent,
-                        appBar: AppBar(
-                          backgroundColor: Colors.transparent,
-                          title: const Text('通话摘要'),
-                        ),
-                        body: SingleChildScrollView(
-                          padding: const EdgeInsets.all(20),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
+                        title: const Text('通话摘要'),
+                      ),
+                      body: SingleChildScrollView(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(summary, style: const TextStyle(height: 1.6)),
+                            if (transcript.isNotEmpty) ...[
+                              const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 16),
+                                child: Divider(),
+                              ),
+                              const Text(
+                                '通话原文',
+                                style: TextStyle(fontWeight: FontWeight.w700),
+                              ),
+                              const SizedBox(height: 8),
                               Text(
-                                summary,
+                                transcript,
                                 style: const TextStyle(height: 1.6),
                               ),
-                              if (transcript.isNotEmpty) ...[
-                                const Padding(
-                                  padding: EdgeInsets.symmetric(vertical: 16),
-                                  child: Divider(),
-                                ),
-                                const Text(
-                                  '通话原文',
-                                  style: TextStyle(fontWeight: FontWeight.w700),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  transcript,
-                                  style: const TextStyle(height: 1.6),
-                                ),
-                              ],
                             ],
-                          ),
+                          ],
                         ),
                       ),
                     ),
                   ),
+                ),
           child: Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -3306,12 +3437,16 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                   child: Text(
                     failed ? '通话已结束 · 摘要未生成' : '通话已结束 · $durationText',
                     style: const TextStyle(
-                        color: Colors.white, fontFamily: 'TideFont'),
+                      color: Colors.white,
+                      fontFamily: 'TideFont',
+                    ),
                   ),
                 ),
                 if (!failed)
-                  const Icon(Icons.chevron_right_rounded,
-                      color: Colors.white70),
+                  const Icon(
+                    Icons.chevron_right_rounded,
+                    color: Colors.white70,
+                  ),
               ],
             ),
           ),
@@ -3411,9 +3546,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
 
   Widget _replyCard(String replyId, bool isUser) {
     final original = _msgs.cast<Map<String, dynamic>?>().firstWhere(
-          (item) => item?['id']?.toString() == replyId,
-          orElse: () => null,
-        );
+      (item) => item?['id']?.toString() == replyId,
+      orElse: () => null,
+    );
     final missing = original == null;
     final author = missing
         ? '原消息'
@@ -3471,8 +3606,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                         : const DefaultChatBackground(),
                   )
                 : theme.hasGlobalBackground && !_chatBackgroundCleared
-                    ? const SizedBox.expand()
-                    : const DefaultChatBackground(),
+                ? const SizedBox.expand()
+                : const DefaultChatBackground(),
           ),
           Column(
             children: [
@@ -3505,18 +3640,39 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     );
   }
 
+  Color _messageTimeColor(TideTheme theme) => theme.isDark
+      ? Colors.white.withValues(alpha: .92)
+      : Colors.black.withValues(alpha: .72);
+
+  List<Shadow> _messageTimeShadows(TideTheme theme) => [
+    Shadow(
+      color: theme.isDark
+          ? Colors.black.withValues(alpha: .72)
+          : Colors.white.withValues(alpha: .78),
+      blurRadius: 3,
+    ),
+  ];
+
   Widget _chatHeader() {
     final theme = TideTheme.of(context);
-    final frosted = _hasBg || theme.useLiquidGlass;
+    final hasImmersiveBackground = _hasBg || theme.hasGlobalBackground;
+    final shouldBlur = theme.useLiquidGlass && hasImmersiveBackground;
     return ClipRRect(
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        filter: ImageFilter.blur(
+          sigmaX: shouldBlur ? 20 : 0,
+          sigmaY: shouldBlur ? 20 : 0,
+        ),
         child: Container(
-          color: frosted
-              ? theme.glass.withValues(alpha: 0.15)
-              : theme.hasGlobalBackground
-                  ? theme.glass.withValues(alpha: 0.55)
-                  : theme.pageBackground,
+          // The chat background is already rendered behind the header. Keep
+          // this layer transparent so the status bar and toolbar feel like one
+          // continuous image instead of a separate card.
+          color: hasImmersiveBackground
+              ? (shouldBlur
+                    ? theme.glass.withValues(alpha: .10)
+                    : Colors.transparent)
+              : theme.pageBackground,
+
           child: SafeArea(
             bottom: false,
             child: Container(
@@ -3561,23 +3717,35 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                     ),
                   ),
                   IconButton(
-                    icon: Icon(Icons.call_rounded,
-                        size: 20, color: theme.primary),
+                    icon: Icon(
+                      Icons.call_rounded,
+                      size: 20,
+                      color: theme.primary,
+                    ),
                     onPressed: _openCallPreparation,
                   ),
                   IconButton(
-                    icon: Icon(Icons.delete_outline_rounded,
-                        size: 20, color: theme.iconMuted),
+                    icon: Icon(
+                      Icons.delete_outline_rounded,
+                      size: 20,
+                      color: theme.iconMuted,
+                    ),
                     onPressed: _showDeleteOptions,
                   ),
                   IconButton(
-                    icon: Icon(Icons.settings_rounded,
-                        size: 20, color: theme.iconMuted),
+                    icon: Icon(
+                      Icons.settings_rounded,
+                      size: 20,
+                      color: theme.iconMuted,
+                    ),
                     onPressed: _showModelSettings,
                   ),
                   IconButton(
-                    icon: Icon(Icons.menu_rounded,
-                        size: 20, color: theme.iconMuted),
+                    icon: Icon(
+                      Icons.menu_rounded,
+                      size: 20,
+                      color: theme.iconMuted,
+                    ),
                     onPressed: _showBotInfo,
                   ),
                 ],
@@ -3596,12 +3764,14 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     // 这里只校验已选择的配置；当前没有实时 STT/TTS 运行时，
     // 因而不会开始录音、转写或播放伪造的通话音频。
     final prefs = await SharedPreferences.getInstance();
-    final hasStt = (prefs.getString('stt_model_$botId') ??
-            (_bot['stt_model']?.toString() ?? ''))
-        .isNotEmpty;
-    final hasTts = (prefs.getString('tts_model_$botId') ??
-            (_bot['tts_model']?.toString() ?? ''))
-        .isNotEmpty;
+    final hasStt =
+        (prefs.getString('stt_model_$botId') ??
+                (_bot['stt_model']?.toString() ?? ''))
+            .isNotEmpty;
+    final hasTts =
+        (prefs.getString('tts_model_$botId') ??
+                (_bot['tts_model']?.toString() ?? ''))
+            .isNotEmpty;
 
     if (!mounted || !await AppPermissions.microphone(context) || !mounted) {
       return;
@@ -3642,8 +3812,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       '402' => '账户余额或配额不足：到服务商后台检查余额、免费额度和并发配额，充值或切换已开通模型。',
       '404' =>
         '地址或模型不存在：检查 Base URL 是否重复包含 /v1、/chat/completions，确认模型 ID 与服务商控制台完全一致。',
-      '408' ||
-      'timeout' =>
+      '408' || 'timeout' =>
         '请求超时：检查网络和服务端排队；降低回复长度或附件尺寸。主模型持续超时时，还要分别测试备用模型的 URL、Key 与模型名。',
       '409' => '请求与正在进行的任务冲突：等待当前请求结束后再发送，不要连续重复点击发送。',
       '413' => '请求内容过大：减少图片、文件文本或历史上下文，并确认最大上下文不超过模型实际窗口。',
@@ -3652,15 +3821,11 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       '500' ||
       '502' ||
       '503' ||
-      '504' =>
-        '服务商侧异常：查看服务商状态页并稍后重试；若备用模型也失败，请分别测试其连接。',
-      'network' ||
-      'dns' ||
-      'connection refused' =>
+      '504' => '服务商侧异常：查看服务商状态页并稍后重试；若备用模型也失败，请分别测试其连接。',
+      'network' || 'dns' || 'connection refused' =>
         '无法建立网络连接：确认设备联网、DNS/代理可用、域名可解析，并检查 Base URL 不是网页或内网地址。',
       'ssl' || 'tls' || 'certificate' => 'HTTPS 证书校验失败：检查设备时间、证书有效性和代理是否注入证书。',
-      'empty response' ||
-      'invalid response' =>
+      'empty response' || 'invalid response' =>
         '服务端返回格式不是 OpenAI 兼容响应：检查接口类型和路径；部分模型需关闭工具调用或改用专用接口。',
       _ => '请打开完整日志定位 HTTP 状态与响应体，再按对应状态检查模型、接口地址、密钥、账户配额、网络或功能兼容性。',
     };
@@ -3669,7 +3834,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
 
   void _showErrorDetails(Map<String, dynamic> message) {
     final log = message['error_log']?.toString().trim();
-    final content = message['error_text']?.toString() ??
+    final content =
+        message['error_text']?.toString() ??
         message['error_message']?.toString() ??
         message['content']?.toString() ??
         '请求失败';
@@ -3776,9 +3942,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
             child: Row(
               mainAxisAlignment: MainAxisAlignment.start,
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildInnerThoughtBubble(theme, m),
-              ],
+              children: [_buildInnerThoughtBubble(theme, m)],
             ),
           );
         }
@@ -3788,8 +3952,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           return Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: Row(
-              mainAxisAlignment:
-                  isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+              mainAxisAlignment: isUser
+                  ? MainAxisAlignment.end
+                  : MainAxisAlignment.start,
               children: [
                 VoiceCallCard(
                   message: m,
@@ -3803,31 +3968,35 @@ class _ChatRoomPageState extends State<ChatRoomPage>
 
         // 内存消息使用 image/audio；数据库历史使用 type/file_path，统一兼容两种来源。
         final filePath = m['file_path']?.toString();
-        final imagePath = m['image']?.toString() ??
+        final imagePath =
+            m['image']?.toString() ??
             ((m['type'] == 'image' || m['type'] == 'sticker')
                 ? filePath
                 : null);
         final emojiAsset = m['type'] == 'emoji' ? filePath : null;
         final audioPath =
             m['audio']?.toString() ?? (m['type'] == 'audio' ? filePath : null);
-        final videoPath = (m['type'] == 'video' ||
+        final videoPath =
+            (m['type'] == 'video' ||
                 (m['type'] == 'document' &&
                     filePath != null &&
                     isVideoAttachment(filePath)))
             ? filePath
             : null;
         final hasVideo = videoPath?.isNotEmpty == true;
-        final documentPath =
-            m['type'] == 'document' && !hasVideo ? filePath : null;
+        final documentPath = m['type'] == 'document' && !hasVideo
+            ? filePath
+            : null;
         final hasImg = imagePath?.isNotEmpty == true;
         final hasAudio = audioPath?.isNotEmpty == true;
         final hasDocument = documentPath?.isNotEmpty == true;
-        final hasPreviousDocument = i < _msgs.length - 1 &&
+        final hasPreviousDocument =
+            i < _msgs.length - 1 &&
             _msgs[_msgs.length - 2 - i]['type'] == 'document';
         final documentName =
             m['document_name']?.toString().trim().isNotEmpty == true
-                ? m['document_name'].toString()
-                : (documentPath?.split(Platform.pathSeparator).last ?? '文档');
+            ? m['document_name'].toString()
+            : (documentPath?.split(Platform.pathSeparator).last ?? '文档');
         final documentExt = documentName.contains('.')
             ? documentName.split('.').last.toUpperCase()
             : '文件';
@@ -3835,8 +4004,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         final isEmoji = m['type'] == 'emoji';
         // 表情包和固定 emoji 的 content 都是模型语义，绝不能作为正文显示。
         final hasSummary = m['type'] == 'call_summary';
-        final txt =
-            (isSticker || isEmoji) ? '' : ((m['content'] as String?) ?? '');
+        final txt = (isSticker || isEmoji)
+            ? ''
+            : ((m['content'] as String?) ?? '');
         final sharedPost = _sharedPostPayload(m);
         final replyId = m['reply_to_id']?.toString();
         final sources = _decodeSources(m['sources_json']);
@@ -3849,7 +4019,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         // 只有气泡真正渲染出可见内容时才显示时间：图片/贴纸必须文件真实存在，
         // 文本必须非空，避免生成图片或分段等待时时间先出、内容后到。
         final imageExists = hasImg && File(imagePath!).existsSync();
-        final hasVisibleContent = hasSummary ||
+        final hasVisibleContent =
+            hasSummary ||
             isUser ||
             txt.isNotEmpty ||
             hasImg ||
@@ -3858,7 +4029,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
             hasVideo ||
             replyId?.isNotEmpty == true ||
             sharedPost != null;
-        final showTimeHere = _showMessageTime &&
+        final showTimeHere =
+            _showMessageTime &&
             !isStreamingPlaceholder &&
             !isEmoji &&
             !isSticker &&
@@ -3866,7 +4038,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         final showTimeForAssistant = showTimeHere && !isUser;
         final isRetrying =
             m['is_retrying'] == true || m['retry_status'] == 'retrying';
-        final hasRetryFailure = m['retry_status'] == 'failed' ||
+        final hasRetryFailure =
+            m['retry_status'] == 'failed' ||
             m['error_log']?.toString().isNotEmpty == true;
         return GestureDetector(
           key: _messageKeys.putIfAbsent(
@@ -3891,8 +4064,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                     onLongPress: () => _msgLongPress(m),
                   )
                 : Align(
-                    alignment:
-                        isUser ? Alignment.centerRight : Alignment.centerLeft,
+                    alignment: isUser
+                        ? Alignment.centerRight
+                        : Alignment.centerLeft,
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: isUser
@@ -3938,12 +4112,14 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                                               child: Icon(
                                                 Icons.person_rounded,
                                                 size: 16,
-                                                color: TideTheme.of(context)
-                                                    .primary,
+                                                color: TideTheme.of(
+                                                  context,
+                                                ).primary,
                                               ),
                                             )
                                           : TideBotAvatar(
-                                              name: _bot['name']?.toString() ??
+                                              name:
+                                                  _bot['name']?.toString() ??
                                                   'TideBot',
                                               path: _bot['avatar']?.toString(),
                                               size: 28,
@@ -3964,33 +4140,46 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                                       ),
                                     GestureDetector(
                                       onTap: () async {
-                                        if (documentPath != null &&
-                                            await File(documentPath).exists()) {
-                                          final opened = await launchUrl(
-                                            Uri.file(documentPath),
-                                            mode:
-                                                LaunchMode.externalApplication,
-                                          );
-                                          if (!opened && mounted) {
-                                            GlobalNotice.show('没有可打开此文件的应用');
+                                        try {
+                                          if (documentPath == null ||
+                                              !await File(
+                                                documentPath,
+                                              ).exists()) {
+                                            GlobalNotice.show('文件不存在或已被清理');
+                                            return;
                                           }
+                                          await const MethodChannel(
+                                            'tidebot.native.channel',
+                                          ).invokeMethod<void>('openChatFile', {
+                                            'path': documentPath,
+                                          });
+                                        } on PlatformException catch (error) {
+                                          GlobalNotice.show(
+                                            '打开文件失败：${error.message ?? '无法启动应用选择器'}',
+                                          );
+                                        } catch (_) {
+                                          GlobalNotice.show('打开文件失败，请稍后重试');
                                         }
                                       },
                                       child: Container(
-                                        margin:
-                                            const EdgeInsets.only(bottom: 8),
+                                        margin: const EdgeInsets.only(
+                                          bottom: 8,
+                                        ),
                                         padding: const EdgeInsets.all(12),
                                         decoration: BoxDecoration(
                                           color: isUser
                                               ? TideTheme.of(context).primary
-                                              : TideTheme.of(context)
-                                                  .buttonSecondary,
-                                          borderRadius:
-                                              BorderRadius.circular(14),
+                                              : TideTheme.of(
+                                                  context,
+                                                ).buttonSecondary,
+                                          borderRadius: BorderRadius.circular(
+                                            14,
+                                          ),
                                           border: Border.all(
                                             color: isUser
-                                                ? Colors.white
-                                                    .withValues(alpha: .28)
+                                                ? Colors.white.withValues(
+                                                    alpha: .28,
+                                                  )
                                                 : TideTheme.of(context).border,
                                           ),
                                         ),
@@ -4008,9 +4197,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                                                       )
                                                     : TideTheme.of(
                                                         context,
-                                                      )
-                                                        .primary
-                                                        .withValues(alpha: .12),
+                                                      ).primary.withValues(
+                                                        alpha: .12,
+                                                      ),
                                                 borderRadius:
                                                     BorderRadius.circular(9),
                                               ),
@@ -4024,8 +4213,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                                                     size: 20,
                                                     color: isUser
                                                         ? Colors.white
-                                                        : TideTheme.of(context)
-                                                            .primary,
+                                                        : TideTheme.of(
+                                                            context,
+                                                          ).primary,
                                                   ),
                                                   Text(
                                                     documentExt,
@@ -4096,8 +4286,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                                       child: GestureDetector(
                                         onTap: () => _previewImg(imagePath),
                                         child: ClipRRect(
-                                          borderRadius:
-                                              BorderRadius.circular(12),
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
                                           child: isSticker
                                               ? SizedBox(
                                                   width: 112,
@@ -4119,8 +4310,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                                       alignment: Alignment.center,
                                       margin: const EdgeInsets.only(bottom: 4),
                                       decoration: BoxDecoration(
-                                        color: TideTheme.of(context)
-                                            .buttonSecondary,
+                                        color: TideTheme.of(
+                                          context,
+                                        ).buttonSecondary,
                                         borderRadius: BorderRadius.circular(12),
                                       ),
                                       child: Text(
@@ -4174,16 +4366,18 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                                               isRetrying)
                                             Padding(
                                               padding: const EdgeInsets.only(
-                                                  right: 4),
+                                                right: 4,
+                                              ),
                                               child: SizedBox(
                                                 width: 10,
                                                 height: 10,
                                                 child:
                                                     CircularProgressIndicator(
-                                                  strokeWidth: 1.4,
-                                                  color: TideTheme.of(context)
-                                                      .textFaint,
-                                                ),
+                                                      strokeWidth: 1.4,
+                                                      color: TideTheme.of(
+                                                        context,
+                                                      ).textFaint,
+                                                    ),
                                               ),
                                             ),
                                           if (showTimeHere)
@@ -4191,8 +4385,12 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                                               fmtTime(ts),
                                               style: TextStyle(
                                                 fontSize: 10,
-                                                color: TideTheme.of(context)
-                                                    .textFaint,
+                                                color: _messageTimeColor(
+                                                  TideTheme.of(context),
+                                                ),
+                                                shadows: _messageTimeShadows(
+                                                  TideTheme.of(context),
+                                                ),
                                                 fontFamily: 'TideFont',
                                               ),
                                             ),
@@ -4235,19 +4433,23 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       final values = jsonDecode(raw.toString());
       if (values is! List) return [];
       final seenUrls = <String>{};
-      return values.whereType<Map>().map((item) {
-        final title = item['title']?.toString().trim() ?? '';
-        final url = item['url']?.toString().trim() ?? '';
-        return <String, String>{
-          'title': title.isEmpty ? '网页来源' : title,
-          'url': url,
-        };
-      }).where((item) {
-        final uri = Uri.tryParse(item['url']!);
-        return uri != null &&
-            (uri.scheme == 'http' || uri.scheme == 'https') &&
-            seenUrls.add(uri.toString());
-      }).toList();
+      return values
+          .whereType<Map>()
+          .map((item) {
+            final title = item['title']?.toString().trim() ?? '';
+            final url = item['url']?.toString().trim() ?? '';
+            return <String, String>{
+              'title': title.isEmpty ? '网页来源' : title,
+              'url': url,
+            };
+          })
+          .where((item) {
+            final uri = Uri.tryParse(item['url']!);
+            return uri != null &&
+                (uri.scheme == 'http' || uri.scheme == 'https') &&
+                seenUrls.add(uri.toString());
+          })
+          .toList();
     } catch (_) {
       return [];
     }
@@ -4283,8 +4485,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           minimumSize: const Size(0, 34),
           padding: const EdgeInsets.symmetric(horizontal: 10),
           side: BorderSide(color: theme.primary.withValues(alpha: .45)),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
         ),
       ),
     );
@@ -4293,10 +4496,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
 
   // 富文本解析：旁白括号灰化
   Widget _parseText(String text, bool isUser) {
-    final codeBlockRegex = RegExp(
-      r'```(\w*)\n([\s\S]*?)```',
-      multiLine: true,
-    );
+    final codeBlockRegex = RegExp(r'```(\w*)\n([\s\S]*?)```', multiLine: true);
 
     final matches = codeBlockRegex.allMatches(text);
     if (matches.isEmpty) {
@@ -4318,11 +4518,13 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       final code = match.group(2)?.trim();
 
       if (code != null && code.isNotEmpty) {
-        widgets.add(CodeCard(
-          code: code,
-          language: language?.isEmpty == true ? 'code' : language!,
-          isUser: isUser,
-        ));
+        widgets.add(
+          CodeCard(
+            code: code,
+            language: language?.isEmpty == true ? 'code' : language!,
+            isUser: isUser,
+          ),
+        );
       }
 
       lastEnd = match.end;
@@ -4336,8 +4538,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     }
 
     return Column(
-      crossAxisAlignment:
-          isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      crossAxisAlignment: isUser
+          ? CrossAxisAlignment.end
+          : CrossAxisAlignment.start,
       children: widgets,
     );
   }
@@ -4351,8 +4554,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     );
     final spans = <TextSpan>[];
     final reg = RegExp(r'\(.*?\)');
-    final matches =
-        _dimParentheticalText ? reg.allMatches(text) : const <RegExpMatch>[];
+    final matches = _dimParentheticalText
+        ? reg.allMatches(text)
+        : const <RegExpMatch>[];
     int last = 0;
     for (final m in matches) {
       if (m.start > last) {
@@ -4407,8 +4611,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
 
     // 卡片补充预览，消息气泡完整保留分享原文和链接。
     return Column(
-      crossAxisAlignment:
-          isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      crossAxisAlignment: isUser
+          ? CrossAxisAlignment.end
+          : CrossAxisAlignment.start,
       children: [
         // 显示所有链接预览卡片
         for (final url in urls) _buildLinkPreviewCard(url, isUser),
@@ -4482,7 +4687,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                     borderRadius: BorderRadius.circular(6),
                     child: isImage
                         ? Image(
-                            image: photoImageProvider(path), fit: BoxFit.cover)
+                            image: photoImageProvider(path),
+                            fit: BoxFit.cover,
+                          )
                         : Tooltip(
                             message: path.split(Platform.pathSeparator).last,
                             child: Container(
@@ -4574,8 +4781,11 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                 onTap: () => setState(() => _pendingExpression = null),
                 child: const Padding(
                   padding: EdgeInsets.all(3),
-                  child:
-                      Icon(Icons.close_rounded, size: 14, color: Colors.white),
+                  child: Icon(
+                    Icons.close_rounded,
+                    size: 14,
+                    color: Colors.white,
+                  ),
                 ),
               ),
             ),
@@ -4603,14 +4813,17 @@ class _ChatRoomPageState extends State<ChatRoomPage>
             ),
             child: _emojiPanelMounted
                 ? SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(0, 1),
-                      end: Offset.zero,
-                    ).animate(CurvedAnimation(
-                      parent: _emojiPanelCtrl,
-                      curve: Curves.easeOutCubic,
-                      reverseCurve: Curves.easeInCubic,
-                    )),
+                    position:
+                        Tween<Offset>(
+                          begin: const Offset(0, 1),
+                          end: Offset.zero,
+                        ).animate(
+                          CurvedAnimation(
+                            parent: _emojiPanelCtrl,
+                            curve: Curves.easeOutCubic,
+                            reverseCurve: Curves.easeInCubic,
+                          ),
+                        ),
                     child: _emojiPicker(TideTheme.of(context)),
                   )
                 : const SizedBox.shrink(),
@@ -4622,7 +4835,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
 
   Widget _inputBar() {
     final theme = TideTheme.of(context);
-    final hasSendContent = _hasText ||
+    final hasSendContent =
+        _hasText ||
         _pendingImages.isNotEmpty ||
         _pendingDocuments.isNotEmpty ||
         _pendingExpression != null;
@@ -4632,8 +4846,11 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       child: SlideTransition(
         position: Tween<Offset>(begin: const Offset(0, .08), end: Offset.zero)
             .animate(
-          CurvedAnimation(parent: _bottomBarCtrl, curve: Curves.easeOutCubic),
-        ),
+              CurvedAnimation(
+                parent: _bottomBarCtrl,
+                curve: Curves.easeOutCubic,
+              ),
+            ),
         child: Container(
           constraints: const BoxConstraints(minHeight: 54),
           padding: const EdgeInsets.fromLTRB(6, 4, 6, 4),
@@ -4657,12 +4874,16 @@ class _ChatRoomPageState extends State<ChatRoomPage>
               Row(
                 children: [
                   Builder(
-                      builder: (triggerContext) => IconButton(
-                            tooltip: '图片和文件',
-                            onPressed: () => _pickMedia(triggerContext),
-                            icon: Icon(Icons.add_rounded,
-                                size: 26, color: theme.iconMuted),
-                          )),
+                    builder: (triggerContext) => IconButton(
+                      tooltip: '图片和文件',
+                      onPressed: () => _pickMedia(triggerContext),
+                      icon: Icon(
+                        Icons.add_rounded,
+                        size: 26,
+                        color: theme.iconMuted,
+                      ),
+                    ),
+                  ),
                   Expanded(
                     child: TextField(
                       contextMenuBuilder: androidTextContextMenu,
@@ -4672,18 +4893,22 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                       maxLines: 4,
                       textInputAction: TextInputAction.newline,
                       style: TextStyle(
-                          fontSize: 15,
-                          fontFamily: 'TideFont',
-                          color: theme.textStrong),
+                        fontSize: 15,
+                        fontFamily: 'TideFont',
+                        color: theme.textStrong,
+                      ),
                       decoration: InputDecoration(
                         hintText: '发消息...',
                         hintStyle: TextStyle(
-                            color: theme.textFaint,
-                            fontSize: 14,
-                            fontFamily: 'TideFont'),
+                          color: theme.textFaint,
+                          fontSize: 14,
+                          fontFamily: 'TideFont',
+                        ),
                         border: InputBorder.none,
                         contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 4, vertical: 10),
+                          horizontal: 4,
+                          vertical: 10,
+                        ),
                       ),
                     ),
                   ),
@@ -4720,8 +4945,11 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                                   shape: BoxShape.circle,
                                   color: theme.primary,
                                 ),
-                                child: const Icon(Icons.arrow_upward_rounded,
-                                    size: 18, color: Colors.white),
+                                child: const Icon(
+                                  Icons.arrow_upward_rounded,
+                                  size: 18,
+                                  color: Colors.white,
+                                ),
                               ),
                             )
                           : IconButton(
@@ -4729,13 +4957,15 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                               tooltip: _isRecording ? '结束录音' : '录音',
                               onPressed:
                                   !_isRecording && _sendVoiceCooldown.isBlocked
-                                      ? null
-                                      : _toggleRec,
-                              icon: Icon(Icons.mic_rounded,
-                                  size: 22,
-                                  color: _isRecording
-                                      ? Colors.red
-                                      : theme.iconMuted),
+                                  ? null
+                                  : _toggleRec,
+                              icon: Icon(
+                                Icons.mic_rounded,
+                                size: 22,
+                                color: _isRecording
+                                    ? Colors.red
+                                    : theme.iconMuted,
+                              ),
                             ),
                     ),
                   ),
@@ -4809,32 +5039,32 @@ class _EmojiPanelTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Material(
-        color: selected ? primary.withValues(alpha: .14) : Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(8),
-          child: SizedBox(
-            height: 40,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(icon, size: 18, color: selected ? primary : muted),
-                const SizedBox(width: 6),
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: selected ? primary : muted,
-                    fontSize: 13,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                    fontFamily: 'TideFont',
-                  ),
-                ),
-              ],
+    color: selected ? primary.withValues(alpha: .14) : Colors.transparent,
+    borderRadius: BorderRadius.circular(8),
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox(
+        height: 40,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 18, color: selected ? primary : muted),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: selected ? primary : muted,
+                fontSize: 13,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                fontFamily: 'TideFont',
+              ),
             ),
-          ),
+          ],
         ),
-      );
+      ),
+    ),
+  );
 }
 
 class _SharedPostCard extends StatefulWidget {
@@ -4914,8 +5144,9 @@ class _SharedPostCardState extends State<_SharedPostCard> {
     final timestamp = (payload['timestamp'] as num?)?.toInt();
     final imageExists = imagePath.isNotEmpty && File(imagePath).existsSync();
     final foreground = isUser ? Colors.white : theme.textStrong;
-    final muted =
-        isUser ? Colors.white.withValues(alpha: 0.76) : theme.textWeak;
+    final muted = isUser
+        ? Colors.white.withValues(alpha: 0.76)
+        : theme.textWeak;
     return GestureDetector(
       onTap: _deleted ? null : _open,
       child: Container(
@@ -4930,18 +5161,18 @@ class _SharedPostCardState extends State<_SharedPostCard> {
         child: _deleted
             ? Text(
                 sharedPostDeletedUserCopy,
-                style: TextStyle(
-                  color: muted,
-                  fontFamily: 'TideFont',
-                ),
+                style: TextStyle(color: muted, fontFamily: 'TideFont'),
               )
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.dynamic_feed_rounded,
-                          size: 17, color: foreground),
+                      Icon(
+                        Icons.dynamic_feed_rounded,
+                        size: 17,
+                        color: foreground,
+                      ),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(

@@ -13,6 +13,11 @@ class AppPluginChatHost implements PluginChatHost {
       await DBManager().getBotData(botId) != null;
   @override
   Future<Map<String, dynamic>?> findMessage(String id, String botId) async {
+    final pending = MessageDeliveryService.instance.pendingPluginMessage(
+      id,
+      botId,
+    );
+    if (pending != null) return pending;
     final db = await DBManager().database;
     final rows = await db.query(
       'chat_history',
@@ -25,7 +30,7 @@ class AppPluginChatHost implements PluginChatHost {
 
   @override
   Future<void> insert(Map<String, dynamic> message) =>
-      MessageDeliveryService.instance.insert(message);
+      MessageDeliveryService.instance.insertPluginMessage(message);
   @override
   Future<Directory> documents() => getApplicationDocumentsDirectory();
   @override

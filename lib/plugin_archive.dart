@@ -8,15 +8,16 @@ import 'plugin_contract.dart';
 
 /// Pure Dart package validation, shared by installation and package checks.
 class PluginArchive {
-  static const maxCompressed = 50 * 1024 * 1024;
-  static const maxExpanded = 100 * 1024 * 1024;
+  static const maxCompressed = 256 * 1024 * 1024;
+  static const maxExpanded = 512 * 1024 * 1024;
+  static const maxEntries = 10000;
   final Map<String, dynamic> manifest;
   final Map<String, List<int>> files;
   PluginArchive._(this.manifest, this.files);
 
   static PluginArchive decode(List<int> bytes) {
     if (bytes.length > maxCompressed) {
-      throw const FormatException('插件包超过 50 MB 限制');
+      throw const FormatException('插件包超过 256 MiB 限制');
     }
     try {
       final directory = ZipDirectory()..read(InputMemoryStream(bytes));
@@ -25,8 +26,8 @@ class PluginArchive {
           directory.diskWithTheStartOfTheCentralDirectory != 0 ||
           directory.fileHeaders.length !=
               directory.totalCentralDirectoryEntries ||
-          directory.fileHeaders.length > 2000) {
-        throw const FormatException('ZIP 目录无效、分卷或条目超过 2000');
+          directory.fileHeaders.length > maxEntries) {
+        throw const FormatException('ZIP 目录无效、分卷或条目超过 10000');
       }
       final entries = <String, ZipFileHeader>{};
       final directories = <String>{};
@@ -58,7 +59,7 @@ class PluginArchive {
         } else {
           expanded += header.uncompressedSize;
           if (header.uncompressedSize < 0 || expanded > maxExpanded) {
-            throw const FormatException('插件解压后超过 100 MB 限制');
+            throw const FormatException('插件解压后超过 512 MiB 限制');
           }
           entries[name] = header;
         }
