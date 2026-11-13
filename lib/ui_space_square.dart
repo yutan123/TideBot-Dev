@@ -273,7 +273,9 @@ class _SpacePageState extends State<SpacePage> {
             ? Center(child: CircularProgressIndicator(color: theme.primary))
             : SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+                padding: theme.isWechat
+                    ? const EdgeInsets.fromLTRB(12, 16, 12, 32)
+                    : const EdgeInsets.fromLTRB(16, 12, 16, 100),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1236,7 +1238,131 @@ class SquarePageState extends State<SquarePage>
         : content;
   }
 
-  Widget _buildFeeds(TideTheme theme) => _feeds.isEmpty
+  Widget _wechatFeeds(TideTheme theme) => ListView.builder(
+    controller: _scrollCtrl,
+    padding: const EdgeInsets.only(bottom: 32),
+    itemCount: _feeds.isEmpty ? 1 : _feeds.length,
+    itemBuilder: (context, index) {
+      if (_feeds.isEmpty)
+        return const Padding(
+          padding: EdgeInsets.all(32),
+          child: Center(child: Text('还没有动态，点击 + 发布第一条')),
+        );
+      final feed = _feeds[index];
+      final key = GlobalKey();
+      final image = feed['image']?.toString() ?? '';
+      return GestureDetector(
+        key: key,
+        onTap: () => _openFeedDetail(feed),
+        onLongPress: () => _deleteFeed(feed, key),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: theme.surface,
+            border: Border(bottom: BorderSide(color: theme.border, width: .5)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TideBotAvatar(
+                name: feed['user']?.toString() ?? '用户',
+                path: feed['is_bot'] == true
+                    ? feed['bot_avatar']?.toString()
+                    : null,
+                size: 42,
+                radius: 5,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      feed['user']?.toString() ?? '',
+                      style: const TextStyle(
+                        color: Color(0xFF576B95),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      feed['content']?.toString() ?? '',
+                      style: TextStyle(
+                        fontSize: 16,
+                        height: 1.5,
+                        color: theme.textStrong,
+                      ),
+                    ),
+                    if (image.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 10),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(
+                            maxWidth: 280,
+                            maxHeight: 320,
+                          ),
+                          child: Image.file(
+                            File(image),
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, error, stack) =>
+                                const Icon(Icons.broken_image_outlined),
+                          ),
+                        ),
+                      ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            feed['time']?.toString() ?? '',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: theme.textWeak,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: '动态详情与互动',
+                          onPressed: () => _openFeedDetail(feed),
+                          style: IconButton.styleFrom(
+                            backgroundColor: theme.surfaceVariant,
+                            minimumSize: const Size(36, 28),
+                            padding: EdgeInsets.zero,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                          icon: const Icon(
+                            Icons.more_horiz,
+                            color: Color(0xFF576B95),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if ((feed['likes'] as int? ?? 0) > 0)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        color: theme.surfaceVariant,
+                        child: Text(
+                          '♡  ${feed['likes']} 人赞过',
+                          style: const TextStyle(color: Color(0xFF576B95)),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+
+  Widget _buildFeeds(TideTheme theme) => theme.isWechat
+      ? _wechatFeeds(theme)
+      : _feeds.isEmpty
       ? ListView(
           key: const ValueKey('feeds_empty'),
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
@@ -1542,57 +1668,91 @@ class SquarePageState extends State<SquarePage>
     );
   }
 
-  Widget _buildGames(TideTheme theme) => GridView.builder(
-    key: const ValueKey('games'),
-    padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
-    physics: const BouncingScrollPhysics(),
-    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-      crossAxisCount: 2,
-      crossAxisSpacing: 14,
-      mainAxisSpacing: 14,
-      // 仅四款游戏，使用更高的入口卡片以提升可点性与可读性。
-      childAspectRatio: 0.78,
-    ),
-    itemCount: _games.length,
-    itemBuilder: (ctx, i) {
-      final g = _games[i];
-      final icon = _gameIcons[g['icon']] ?? Icons.extension_rounded;
-      return BouncyTap(
-        onTap: () => _startGame(g['name']?.toString() ?? ''),
-        child: FrostCard(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 52, color: theme.primary),
-              const SizedBox(height: 14),
-              Text(
-                g['name'] ?? '',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  fontFamily: 'TideFont',
-                  color: theme.textStrong,
+  Widget _buildGames(TideTheme theme) => theme.isWechat
+      ? ListView.separated(
+          padding: const EdgeInsets.only(bottom: 32),
+          itemCount: _games.length,
+          separatorBuilder: (_, index) =>
+              Divider(height: .5, indent: 72, color: theme.border),
+          itemBuilder: (_, index) {
+            final game = _games[index];
+            return ColoredBox(
+              color: theme.surface,
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
                 ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                g['desc'] ?? '',
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: Color(0xFFC7C7CC),
-                  fontFamily: 'TideFont',
+                leading: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: theme.primary.withValues(alpha: .1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    _gameIcons[game['icon']] ?? Icons.extension_rounded,
+                    color: theme.primary,
+                  ),
                 ),
+                title: Text(game['name'] ?? ''),
+                subtitle: Text(game['desc'] ?? ''),
+                trailing: Icon(Icons.chevron_right, color: theme.textWeak),
+                onTap: () => _startGame(game['name']?.toString() ?? ''),
               ),
-            ],
+            );
+          },
+        )
+      : GridView.builder(
+          key: const ValueKey('games'),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
+          physics: const BouncingScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            crossAxisSpacing: 14,
+            mainAxisSpacing: 14,
+            // 仅四款游戏，使用更高的入口卡片以提升可点性与可读性。
+            childAspectRatio: 0.78,
           ),
-        ),
-      );
-    },
-  );
+          itemCount: _games.length,
+          itemBuilder: (ctx, i) {
+            final g = _games[i];
+            final icon = _gameIcons[g['icon']] ?? Icons.extension_rounded;
+            return BouncyTap(
+              onTap: () => _startGame(g['name']?.toString() ?? ''),
+              child: FrostCard(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(icon, size: 52, color: theme.primary),
+                    const SizedBox(height: 14),
+                    Text(
+                      g['name'] ?? '',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        fontFamily: 'TideFont',
+                        color: theme.textStrong,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      g['desc'] ?? '',
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFFC7C7CC),
+                        fontFamily: 'TideFont',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
 }
 
 // ==================== 全屏发布页 ====================

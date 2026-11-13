@@ -58,7 +58,8 @@ class _TideBackgroundState extends State<TideBackground> {
     final theme = TideTheme.of(context);
     final useGlobalBackground =
         theme.hasGlobalBackground && !widget.excludeGlobalBackground;
-    final path = widget.backgroundPath ??
+    final path =
+        widget.backgroundPath ??
         (useGlobalBackground ? theme.globalBackground : '');
 
     ImageProvider? image;
@@ -83,20 +84,22 @@ class _TideBackgroundState extends State<TideBackground> {
       }
     }
 
-    final hasImage = image != null &&
+    final hasImage =
+        image != null &&
         theme.isGlobalBackgroundReady &&
         (path.isEmpty || File(path).existsSync());
 
     // 无背景图时直接用纯色底，避免 Stack 切换时的闪烁
     if (!hasImage) {
-      return ColoredBox(
-        color: theme.pageBackground,
-        child: widget.child,
-      );
+      return ColoredBox(color: theme.pageBackground, child: widget.child);
     }
 
     final scrimOpacity = widget.opacity ?? theme.effectiveBackgroundOpacity;
-    final scrim = Colors.black.withValues(alpha: scrimOpacity);
+    final scrim = theme.isWechat
+        ? theme.pageBackground.withValues(
+            alpha: (.65 + scrimOpacity * .45).clamp(.70, .97),
+          )
+        : Colors.black.withValues(alpha: scrimOpacity);
 
     // Use a single RepaintBoundary for the background stack to ensure
     // BackdropFilter in child widgets can reference it correctly during animations
@@ -114,9 +117,7 @@ class _TideBackgroundState extends State<TideBackground> {
                 errorBuilder: (_, __, ___) =>
                     ColoredBox(color: theme.pageBackground),
               ),
-              IgnorePointer(
-                child: ColoredBox(color: scrim),
-              ),
+              IgnorePointer(child: ColoredBox(color: scrim)),
             ],
           ),
         ),
@@ -131,6 +132,21 @@ class TideTheme extends ChangeNotifier {
   static const int _maxBackgroundPixels = 12 * 1000 * 1000;
   // 薄荷绿是产品默认主题；其他颜色仅在用户主动选择后使用。
   String _name = 'mint';
+  String _interfaceTheme = 'default';
+  String get interfaceTheme => _interfaceTheme;
+  bool get isWechat => _interfaceTheme == 'wechat';
+  Color get wechatBar =>
+      isDark ? const Color(0xFF191919) : const Color(0xFFEDEDED);
+  Color get wechatOutgoing =>
+      isDark ? const Color(0xFF3EB575) : const Color(0xFF95EC69);
+
+  Future<void> setInterfaceTheme(String value) async {
+    if (value != 'default' && value != 'wechat') return;
+    await DBManager().insertKV('interface_theme', value);
+    _interfaceTheme = value;
+    notifyListeners();
+  }
+
   ThemeMode _mode = ThemeMode.system; // 跟随系统，用户可手动切日/夜
   bool _manualMode = false;
   Color _primary = const Color(0xFF5FAF8A);
@@ -153,8 +169,8 @@ class TideTheme extends ChangeNotifier {
   double _backgroundPreparationDpr = 0;
   final Map<_BackgroundRegion, bool> _backgroundLightness = {};
 
-  Color get primary => _primary;
-  Color get primaryLight => _primaryLight;
+  Color get primary => isWechat ? const Color(0xFF07C160) : _primary;
+  Color get primaryLight => isWechat ? const Color(0xFF38CD7F) : _primaryLight;
   String get name => _name;
   ThemeMode get mode => _mode;
   bool get hasManualMode => _manualMode;
@@ -164,11 +180,12 @@ class TideTheme extends ChangeNotifier {
   double get globalBackgroundOpacity => _globalBackgroundOpacity;
   bool get hasGlobalBackground => _globalBackground.isNotEmpty;
   bool get enableLiquidGlass => _enableLiquidGlass;
-  bool get useLiquidGlass => hasGlobalBackground && enableLiquidGlass;
+  bool get useLiquidGlass =>
+      hasGlobalBackground && enableLiquidGlass && !isWechat;
 
   /// The dock always retains its original flowing glass. Wallpaper glass
   /// controls page surfaces and the selected capsule independently.
-  bool get useDockLiquidGlass => true;
+  bool get useDockLiquidGlass => !isWechat;
 
   void _setGlobalBackgroundImage(String path) {
     _configuredBackgroundPath = '';
@@ -191,12 +208,14 @@ class TideTheme extends ChangeNotifier {
   }
 
   /// Updates an isolated preview without writing preferences or the live theme.
-  void configureBackgroundPreview(TideTheme source, {
+  void configureBackgroundPreview(
+    TideTheme source, {
     required String path,
     required double opacity,
     required bool enableLiquidGlass,
     bool notify = true,
   }) {
+    _interfaceTheme = source._interfaceTheme;
     _name = source._name;
     _mode = source._mode;
     _manualMode = source._manualMode;
@@ -216,10 +235,7 @@ class TideTheme extends ChangeNotifier {
 
   ImageConfiguration _imageConfiguration(BuildContext context) {
     final media = MediaQuery.maybeOf(context);
-    return createLocalImageConfiguration(
-      context,
-      size: media?.size,
-    );
+    return createLocalImageConfiguration(context, size: media?.size);
   }
 
   Future<bool> _isSafeBackgroundFile(String path) async {
@@ -289,11 +305,13 @@ class TideTheme extends ChangeNotifier {
       dpr: dpr,
     );
     _backgroundPreparation = preparation;
-    unawaited(preparation.whenComplete(() {
-      if (identical(_backgroundPreparation, preparation)) {
-        _backgroundPreparation = null;
-      }
-    }));
+    unawaited(
+      preparation.whenComplete(() {
+        if (identical(_backgroundPreparation, preparation)) {
+          _backgroundPreparation = null;
+        }
+      }),
+    );
     return preparation;
   }
 
@@ -349,11 +367,14 @@ class TideTheme extends ChangeNotifier {
       const Rect.fromLTWH(0, 0, 48, 48),
       paint,
     );
-    final thumbnail =
-        await recorder.endRecording().toImage(sampleSize, sampleSize);
+    final thumbnail = await recorder.endRecording().toImage(
+      sampleSize,
+      sampleSize,
+    );
     try {
-      final bytes =
-          await thumbnail.toByteData(format: ui.ImageByteFormat.rawRgba);
+      final bytes = await thumbnail.toByteData(
+        format: ui.ImageByteFormat.rawRgba,
+      );
       if (bytes == null) return;
       final samples = <_BackgroundRegion, Rect>{
         _BackgroundRegion.header: const Rect.fromLTWH(.15, 0, .7, .18),
@@ -365,16 +386,18 @@ class TideTheme extends ChangeNotifier {
         var count = 0;
         for (var y = 0; y < 3; y++) {
           for (var x = 0; x < 3; x++) {
-            final px = ((entry.value.left + entry.value.width * (x / 2)) *
-                    (sampleSize - 1))
-                .round()
-                .clamp(0, sampleSize - 1)
-                .toInt();
-            final py = ((entry.value.top + entry.value.height * (y / 2)) *
-                    (sampleSize - 1))
-                .round()
-                .clamp(0, sampleSize - 1)
-                .toInt();
+            final px =
+                ((entry.value.left + entry.value.width * (x / 2)) *
+                        (sampleSize - 1))
+                    .round()
+                    .clamp(0, sampleSize - 1)
+                    .toInt();
+            final py =
+                ((entry.value.top + entry.value.height * (y / 2)) *
+                        (sampleSize - 1))
+                    .round()
+                    .clamp(0, sampleSize - 1)
+                    .toInt();
             final offset = (py * sampleSize + px) * 4;
             final r = bytes.getUint8(offset) / 255;
             final g = bytes.getUint8(offset + 1) / 255;
@@ -410,9 +433,8 @@ class TideTheme extends ChangeNotifier {
   Color get onBackgroundWeak =>
       _onBackgroundFor(_BackgroundRegion.content, weak: true);
   Color get onBackgroundIcon => onBackgroundStrong;
-  Color get backgroundScrim => Colors.black.withValues(
-        alpha: effectiveBackgroundOpacity,
-      );
+  Color get backgroundScrim =>
+      Colors.black.withValues(alpha: effectiveBackgroundOpacity);
 
   bool get isDark {
     final brightness =
@@ -422,9 +444,10 @@ class TideTheme extends ChangeNotifier {
   }
 
   LinearGradient get primaryGradient =>
-      LinearGradient(colors: [_primary, _primaryLight]);
-  Color get pageBackground =>
-      isDark ? const Color(0xFF151820) : const Color(0xFFF3F5FA);
+      LinearGradient(colors: [primary, primaryLight]);
+  Color get pageBackground => isWechat
+      ? (isDark ? const Color(0xFF111111) : const Color(0xFFEDEDED))
+      : (isDark ? const Color(0xFF151820) : const Color(0xFFF3F5FA));
   Color get bgColor =>
       hasGlobalBackground ? Colors.transparent : pageBackground;
   Color get backgroundOverlayColor =>
@@ -439,10 +462,12 @@ class TideTheme extends ChangeNotifier {
 
   double get backgroundScrimOpacity => effectiveBackgroundOpacity;
 
-  Color get surface =>
-      isDark ? const Color(0xFF20242C) : const Color(0xFFFFFFFF);
-  Color get surfaceVariant =>
-      isDark ? const Color(0xFF2B303A) : const Color(0xFFE9EDF5);
+  Color get surface => isWechat
+      ? (isDark ? const Color(0xFF1F1F1F) : Colors.white)
+      : (isDark ? const Color(0xFF20242C) : const Color(0xFFFFFFFF));
+  Color get surfaceVariant => isWechat
+      ? (isDark ? const Color(0xFF292929) : const Color(0xFFF7F7F7))
+      : (isDark ? const Color(0xFF2B303A) : const Color(0xFFE9EDF5));
   Color get glass => isDark ? const Color(0xE01D222B) : const Color(0xC9FFFFFF);
 
   // Night surfaces stay neutral graphite so theme accents and image content remain distinct.
@@ -477,62 +502,62 @@ class TideTheme extends ChangeNotifier {
     'rose': {
       'name': '玫瑰粉',
       'light': [Color(0xFFD98C94), Color(0xFFE8B8BE)],
-      'dark': [Color(0xFFD98A92), Color(0xFFB0707A)]
+      'dark': [Color(0xFFD98A92), Color(0xFFB0707A)],
     },
     'aurora': {
       'name': '极光蓝',
       'light': [Color(0xFF6C8CD5), Color(0xFFA7BEE8)],
-      'dark': [Color(0xFF7D9BE0), Color(0xFF5A7499)]
+      'dark': [Color(0xFF7D9BE0), Color(0xFF5A7499)],
     },
     'lavender': {
       'name': '薰衣草',
       'light': [Color(0xFF9B8AC4), Color(0xFFC5B8E0)],
-      'dark': [Color(0xFFA79ACD), Color(0xFF7C6FA3)]
+      'dark': [Color(0xFFA79ACD), Color(0xFF7C6FA3)],
     },
     'sky': {
       'name': '雾霾蓝',
       'light': [Color(0xFF5D9BC5), Color(0xFF9CC5E3)],
-      'dark': [Color(0xFF6FA9D2), Color(0xFF4A7DA0)]
+      'dark': [Color(0xFF6FA9D2), Color(0xFF4A7DA0)],
     },
     'mint': {
       'name': '薄荷绿',
       'light': [Color(0xFF5FAF8A), Color(0xFF9CD4BC)],
-      'dark': [Color(0xFF6BB996), Color(0xFF4A8F72)]
+      'dark': [Color(0xFF6BB996), Color(0xFF4A8F72)],
     },
     'peach': {
       'name': '蜜桃橙',
       'light': [Color(0xFFE39A6B), Color(0xFFF0C4A0)],
-      'dark': [Color(0xFFE8A678), Color(0xFFB97D50)]
+      'dark': [Color(0xFFE8A678), Color(0xFFB97D50)],
     },
     'plum': {
       'name': '梅子紫',
       'light': [Color(0xFF8E74B4), Color(0xFFB7A6D6)],
-      'dark': [Color(0xFF9A80C0), Color(0xFF6E5895)]
+      'dark': [Color(0xFF9A80C0), Color(0xFF6E5895)],
     },
     'teal': {
       'name': '青瓷绿',
       'light': [Color(0xFF4FA79C), Color(0xFF92CFC8)],
-      'dark': [Color(0xFF59B3A8), Color(0xFF3E857C)]
+      'dark': [Color(0xFF59B3A8), Color(0xFF3E857C)],
     },
     'sunset': {
       'name': '落日橙',
       'light': [Color(0xFFE06A5A), Color(0xFFF2A79A)],
-      'dark': [Color(0xFFE87668), Color(0xFFB4554A)]
+      'dark': [Color(0xFFE87668), Color(0xFFB4554A)],
     },
     'ocean': {
       'name': '深海蓝',
       'light': [Color(0xFF3E7CB1), Color(0xFF7FAFDB)],
-      'dark': [Color(0xFF4C8EC4), Color(0xFF33658A)]
+      'dark': [Color(0xFF4C8EC4), Color(0xFF33658A)],
     },
     'pinkg': {
       'name': '樱花粉',
       'light': [Color(0xFFE07A9A), Color(0xFFF0B3C6)],
-      'dark': [Color(0xFFE886A4), Color(0xFFB55A78)]
+      'dark': [Color(0xFFE886A4), Color(0xFFB55A78)],
     },
     'night': {
       'name': '午夜紫',
       'light': [Color(0xFF6B5FAE), Color(0xFF9D92D0)],
-      'dark': [Color(0xFF786BC0), Color(0xFF524A86)]
+      'dark': [Color(0xFF786BC0), Color(0xFF524A86)],
     },
   };
 
@@ -543,15 +568,21 @@ class TideTheme extends ChangeNotifier {
   Future<void> loadFromDB() async {
     try {
       final db = DBManager();
-      final name =
-          await db.getKV('theme_color').timeout(const Duration(seconds: 5));
+      final style = await db
+          .getKV('interface_theme')
+          .timeout(const Duration(seconds: 5));
+      _interfaceTheme = style == 'wechat' ? 'wechat' : 'default';
+      final name = await db
+          .getKV('theme_color')
+          .timeout(const Duration(seconds: 5));
       if (name != null && _themes.containsKey(name)) {
         _name = name;
         _applyColors();
       }
       // 读取日夜模式
-      final modeStr =
-          await db.getKV('theme_mode').timeout(const Duration(seconds: 5));
+      final modeStr = await db
+          .getKV('theme_mode')
+          .timeout(const Duration(seconds: 5));
       if (modeStr != null) {
         if (modeStr == 'system') {
           _mode = ThemeMode.system;
@@ -574,7 +605,8 @@ class TideTheme extends ChangeNotifier {
           .getKV(_globalBackgroundSafetyKey)
           .timeout(const Duration(seconds: 5));
       if (globalBackground != null && globalBackground.isNotEmpty) {
-        final isSafe = backgroundIsSafe == 'true' &&
+        final isSafe =
+            backgroundIsSafe == 'true' &&
             await _isSafeBackgroundFile(globalBackground);
         if (isSafe) {
           _globalBackground = globalBackground;
@@ -583,14 +615,15 @@ class TideTheme extends ChangeNotifier {
           await _clearPersistedBackground(db);
         }
       }
-      _globalBackgroundOpacity = (double.tryParse(
-                await db
-                        .getKV('global_background_opacity')
-                        .timeout(const Duration(seconds: 5)) ??
-                    '',
-              ) ??
-              _globalBackgroundOpacity)
-          .clamp(0.18, 0.70);
+      _globalBackgroundOpacity =
+          (double.tryParse(
+                    await db
+                            .getKV('global_background_opacity')
+                            .timeout(const Duration(seconds: 5)) ??
+                        '',
+                  ) ??
+                  _globalBackgroundOpacity)
+              .clamp(0.18, 0.70);
       final enableLiquidGlass = await db
           .getKV('enable_liquid_glass')
           .timeout(const Duration(seconds: 5));
@@ -604,8 +637,8 @@ class TideTheme extends ChangeNotifier {
   void _applyColors() {
     final t = _themes[_name]!;
     final dark = isDark;
-    final palette =
-        ((dark ? t['dark'] : t['light'])! as List<Object>).cast<Color>();
+    final palette = ((dark ? t['dark'] : t['light'])! as List<Object>)
+        .cast<Color>();
     _primary = palette[0];
     _primaryLight = palette[1];
   }
@@ -632,10 +665,11 @@ class TideTheme extends ChangeNotifier {
     }
     _applyColors();
     await DBManager().insertKV(
-        'theme_mode',
-        _mode == ThemeMode.dark
-            ? 'dark'
-            : (_mode == ThemeMode.light ? 'light' : 'system'));
+      'theme_mode',
+      _mode == ThemeMode.dark
+          ? 'dark'
+          : (_mode == ThemeMode.light ? 'light' : 'system'),
+    );
     notifyListeners();
     return _mode == ThemeMode.dark
         ? 'dark'
@@ -653,8 +687,9 @@ class TideTheme extends ChangeNotifier {
     double? opacity,
     bool? enableLiquidGlass,
   }) async {
-    final nextOpacity =
-        opacity == null ? _globalBackgroundOpacity : opacity.clamp(0.18, 0.70);
+    final nextOpacity = opacity == null
+        ? _globalBackgroundOpacity
+        : opacity.clamp(0.18, 0.70);
     final nextEnableLiquidGlass = enableLiquidGlass ?? _enableLiquidGlass;
 
     if (path.isEmpty) {
@@ -683,8 +718,11 @@ class TideTheme extends ChangeNotifier {
     try {
       // Decode before making the selection live. This keeps a bad image from
       // causing every rebuilt screen to retry its decoder.
-      await precacheImage(candidate, context,
-          size: MediaQuery.maybeOf(context)?.size);
+      await precacheImage(
+        candidate,
+        context,
+        size: MediaQuery.maybeOf(context)?.size,
+      );
       final stream = candidate.resolve(_imageConfiguration(context));
       final ready = Completer<ui.Image>();
       late final ImageStreamListener listener;
@@ -750,9 +788,9 @@ class TideTheme extends ChangeNotifier {
     return listen
         ? TideBotThemeProvider.of(context)
         : (context
-                .dependOnInheritedWidgetOfExactType<_TideThemeWidget>()
-                ?.theme ??
-            TideTheme());
+                  .dependOnInheritedWidgetOfExactType<_TideThemeWidget>()
+                  ?.theme ??
+              TideTheme());
   }
 }
 
@@ -760,15 +798,18 @@ enum _BackgroundRegion { header, content, footer }
 
 class _TideThemeWidget extends InheritedNotifier<TideTheme> {
   const _TideThemeWidget({required this.theme, required super.child})
-      : super(notifier: theme);
+    : super(notifier: theme);
   final TideTheme theme;
 }
 
 class TideBotThemeProvider extends StatelessWidget {
   final TideTheme theme;
   final Widget child;
-  const TideBotThemeProvider(
-      {super.key, required this.theme, required this.child});
+  const TideBotThemeProvider({
+    super.key,
+    required this.theme,
+    required this.child,
+  });
   static TideTheme of(BuildContext context) {
     final w = context.dependOnInheritedWidgetOfExactType<_TideThemeWidget>();
     return w?.theme ?? TideTheme();

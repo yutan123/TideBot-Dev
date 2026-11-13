@@ -148,11 +148,13 @@ class _ProfilePageState extends State<ProfilePage> {
     child: SafeArea(
       child: SingleChildScrollView(
         physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 92),
+        padding: TideTheme.of(context).isWechat
+            ? const EdgeInsets.only(bottom: 24)
+            : const EdgeInsets.fromLTRB(16, 16, 16, 92),
         child: Column(
           children: [
             _buildProfileCard(),
-            const SizedBox(height: 24),
+            SizedBox(height: TideTheme.of(context).isWechat ? 0 : 24),
             ..._settings.map(
               (s) => BouncyTap(
                 onTap: () => _onSetting(s),
@@ -215,6 +217,12 @@ class _ProfilePageState extends State<ProfilePage> {
         Icon(Icons.edit_rounded, size: 18, color: theme.onBackgroundWeak),
       ],
     );
+    if (theme.isWechat)
+      return Container(
+        color: theme.surface,
+        padding: const EdgeInsets.fromLTRB(24, 38, 24, 32),
+        child: content,
+      );
     // 全局背景图下不显示卡片，直接返回内容
     if (theme.useLiquidGlass) {
       return Padding(
@@ -251,6 +259,18 @@ class _ProfilePageState extends State<ProfilePage> {
         ),
       ],
     );
+    if (theme.isWechat)
+      return Container(
+        color: theme.surface,
+        padding: const EdgeInsets.only(left: 20),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(0, 18, 20, 18),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: theme.border, width: .5)),
+          ),
+          child: content,
+        ),
+      );
     // 全局背景图下不显示卡片
     if (theme.useLiquidGlass) {
       return Padding(
@@ -1596,7 +1616,9 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
         backgroundColor: Colors.transparent,
         appBar: AppBar(
           title: const Text('普通设置', style: TextStyle(fontFamily: 'TideFont')),
-          backgroundColor: Colors.transparent,
+          backgroundColor: theme.isWechat
+              ? theme.wechatBar
+              : Colors.transparent,
           elevation: 0,
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_ios_rounded),
@@ -1604,7 +1626,9 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
           ),
         ),
         body: ListView(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 32),
+          padding: theme.isWechat
+              ? const EdgeInsets.only(bottom: 32)
+              : const EdgeInsets.fromLTRB(12, 8, 12, 32),
           children: [
             _sectionHeader(theme, '对话表现', Icons.forum_outlined),
             FrostCard(
@@ -2259,7 +2283,9 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
         backgroundColor: Colors.transparent,
         appBar: AppBar(
           title: const Text('通知管理', style: TextStyle(fontFamily: 'TideFont')),
-          backgroundColor: Colors.transparent,
+          backgroundColor: theme.isWechat
+              ? theme.wechatBar
+              : Colors.transparent,
           elevation: 0,
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_ios_rounded),
@@ -2267,7 +2293,9 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
           ),
         ),
         body: ListView(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 32),
+          padding: theme.isWechat
+              ? const EdgeInsets.only(bottom: 32)
+              : const EdgeInsets.fromLTRB(12, 8, 12, 32),
           children: [
             FrostCard(
               padding: const EdgeInsets.symmetric(vertical: 4),

@@ -277,7 +277,7 @@ class _ChatSidebarState extends State<ChatSidebar> {
                                         theme,
                                         Icons.palette_rounded,
                                         '主题',
-                                        null,
+                                        'theme',
                                       ),
                                     ),
                                   ],

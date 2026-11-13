@@ -14,8 +14,10 @@ class TideHaptics {
 
   static Future<void> load() async {
     if (_loaded) return;
-    _enabled = (await SharedPreferences.getInstance())
-            .getBool('tide_haptics_enabled') ??
+    _enabled =
+        (await SharedPreferences.getInstance()).getBool(
+          'tide_haptics_enabled',
+        ) ??
         true;
     _loaded = true;
   }
@@ -23,18 +25,22 @@ class TideHaptics {
   static Future<void> setEnabled(bool value) async {
     _enabled = value;
     _loaded = true;
-    await (await SharedPreferences.getInstance())
-        .setBool('tide_haptics_enabled', value);
+    await (await SharedPreferences.getInstance()).setBool(
+      'tide_haptics_enabled',
+      value,
+    );
   }
 
   static const MethodChannel _channel = MethodChannel('tidebot.native.channel');
 
   static void _impact(int duration, int amplitude, Future<void> fallback) {
     if (!_enabled) return;
-    _channel.invokeMethod<bool>('vibrate', {
-      'duration': duration,
-      'amplitude': amplitude,
-    }).catchError((_) => false);
+    _channel
+        .invokeMethod<bool>('vibrate', {
+          'duration': duration,
+          'amplitude': amplitude,
+        })
+        .catchError((_) => false);
     fallback.catchError((_) => HapticFeedback.vibrate());
   }
 
@@ -50,8 +56,12 @@ class BouncyTap extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
   final double scaleAmount;
-  const BouncyTap(
-      {super.key, required this.child, this.onTap, this.scaleAmount = 0.05});
+  const BouncyTap({
+    super.key,
+    required this.child,
+    this.onTap,
+    this.scaleAmount = 0.05,
+  });
   @override
   State<BouncyTap> createState() => _BouncyTapState();
 }
@@ -64,9 +74,13 @@ class _BouncyTapState extends State<BouncyTap>
   void initState() {
     super.initState();
     _c = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 120));
-    _scale = Tween<double>(begin: 1.0, end: 1.0 - widget.scaleAmount)
-        .animate(CurvedAnimation(parent: _c, curve: Curves.easeOutCubic));
+      vsync: this,
+      duration: const Duration(milliseconds: 120),
+    );
+    _scale = Tween<double>(
+      begin: 1.0,
+      end: 1.0 - widget.scaleAmount,
+    ).animate(CurvedAnimation(parent: _c, curve: Curves.easeOutCubic));
     _c.addStatusListener((s) {
       if (s == AnimationStatus.completed) _c.reverse();
     });
@@ -91,10 +105,11 @@ class _BouncyTapState extends State<BouncyTap>
       },
       onTapCancel: () => _c.reverse(),
       child: AnimatedBuilder(
-          animation: _scale,
-          builder: (c, child) =>
-              Transform.scale(scale: _scale.value, child: child),
-          child: widget.child),
+        animation: _scale,
+        builder: (c, child) =>
+            Transform.scale(scale: _scale.value, child: child),
+        child: widget.child,
+      ),
     );
   }
 }
@@ -104,12 +119,14 @@ class TideBotAvatar extends StatelessWidget {
   final String name;
   final String? path;
   final double size;
+  final double? radius;
 
   const TideBotAvatar({
     super.key,
     required this.name,
     this.path,
     this.size = 52,
+    this.radius,
   });
 
   Color _colorForName() {
@@ -138,10 +155,14 @@ class TideBotAvatar extends StatelessWidget {
     return SizedBox(
       width: size,
       height: size,
-      child: ClipOval(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(radius ?? size / 2),
         child: exists
-            ? Image.file(file,
-                fit: BoxFit.cover, errorBuilder: (_, __, ___) => _fallback())
+            ? Image.file(
+                file,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => _fallback(),
+              )
             : _fallback(),
       ),
     );
@@ -149,8 +170,9 @@ class TideBotAvatar extends StatelessWidget {
 
   Widget _fallback() {
     final trimmed = name.trim();
-    final initial =
-        trimmed.isEmpty ? 'T' : String.fromCharCode(trimmed.runes.first);
+    final initial = trimmed.isEmpty
+        ? 'T'
+        : String.fromCharCode(trimmed.runes.first);
     return ColoredBox(
       color: _colorForName(),
       child: Center(
@@ -170,14 +192,16 @@ class TideBotAvatar extends StatelessWidget {
 }
 
 // ========== 自定义弹窗系统 ==========
-Future<T?> showTideDialog<T>(
-    {required BuildContext context,
-    required WidgetBuilder builder,
-    bool barrierDismissible = true}) {
+Future<T?> showTideDialog<T>({
+  required BuildContext context,
+  required WidgetBuilder builder,
+  bool barrierDismissible = true,
+}) {
   return TideDialogs.show<T>(
-      context: context,
-      builder: builder,
-      barrierDismissible: barrierDismissible);
+    context: context,
+    builder: builder,
+    barrierDismissible: barrierDismissible,
+  );
 }
 
 /// A consistent, app-owned dialog shell. It provides the inset and handles
@@ -206,7 +230,8 @@ class TideDialogSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final body = child ??
+    final body =
+        child ??
         Container(
           decoration: BoxDecoration(
             color: backgroundColor ?? TideTheme.of(context).surface,
@@ -223,8 +248,9 @@ class TideDialogSurface extends StatelessWidget {
               if (actions != null && actions!.isNotEmpty) ...[
                 const SizedBox(height: 14),
                 Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: actions!),
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: actions!,
+                ),
               ],
             ],
           ),
@@ -280,10 +306,11 @@ class _TideEdgeBackGestureState extends State<TideEdgeBackGesture> {
 }
 
 class TideDialogs {
-  static Future<T?> show<T>(
-      {required BuildContext context,
-      required WidgetBuilder builder,
-      bool barrierDismissible = true}) {
+  static Future<T?> show<T>({
+    required BuildContext context,
+    required WidgetBuilder builder,
+    bool barrierDismissible = true,
+  }) {
     return showGeneralDialog<T>(
       context: context,
       barrierDismissible: barrierDismissible,
@@ -292,28 +319,32 @@ class TideDialogs {
       transitionDuration: const Duration(milliseconds: 300),
       pageBuilder: (context, anim1, anim2) => builder(context),
       transitionBuilder: (context, anim, secAnim, child) => ScaleTransition(
-          scale: CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
-          child: FadeTransition(opacity: anim, child: child)),
+        scale: CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
+        child: FadeTransition(opacity: anim, child: child),
+      ),
     );
   }
 
-  static Widget glassContent(
-      {required BuildContext context,
-      required List<Widget> children,
-      double maxWidth = 0.92}) {
+  static Widget glassContent({
+    required BuildContext context,
+    required List<Widget> children,
+    double maxWidth = 0.92,
+  }) {
     final theme = TideTheme.of(context);
     final content = Container(
       width: MediaQuery.of(context).size.width * maxWidth,
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
-        color:
-            theme.surface.withValues(alpha: theme.useLiquidGlass ? 0.96 : 0.94),
+        color: theme.surface.withValues(
+          alpha: theme.useLiquidGlass ? 0.96 : 0.94,
+        ),
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: theme.border, width: 0.5),
         boxShadow: [
           BoxShadow(
-            color: Colors.black
-                .withValues(alpha: theme.useLiquidGlass ? 0.30 : 0.16),
+            color: Colors.black.withValues(
+              alpha: theme.useLiquidGlass ? 0.30 : 0.16,
+            ),
             blurRadius: 28,
             offset: const Offset(0, 12),
           ),
@@ -330,34 +361,47 @@ class TideDialogs {
     return content;
   }
 
-  static Widget glassButton(String label,
-      {required VoidCallback onTap,
-      Color? color,
-      Color textColor = Colors.white}) {
+  static Widget glassButton(
+    String label, {
+    required VoidCallback onTap,
+    Color? color,
+    Color textColor = Colors.white,
+  }) {
     return BouncyTap(
       onTap: onTap,
-      child: Builder(builder: (ctx) {
-        final c = color ?? TideTheme.of(ctx).primary;
-        return Container(
-          height: 44,
-          decoration:
-              BoxDecoration(color: c, borderRadius: BorderRadius.circular(14)),
-          child: Center(
-              child: Text(label,
-                  style: TextStyle(
-                      color: textColor,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      fontFamily: 'TideFont'))),
-        );
-      }),
+      child: Builder(
+        builder: (ctx) {
+          final c = color ?? TideTheme.of(ctx).primary;
+          return Container(
+            height: 44,
+            decoration: BoxDecoration(
+              color: c,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Center(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  fontFamily: 'TideFont',
+                ),
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }
 
 // ========== 底部弹窗（半屏） ==========
-Future<T?> showTideSheet<T>(
-    {required BuildContext context, required Widget child, double? height}) {
+Future<T?> showTideSheet<T>({
+  required BuildContext context,
+  required Widget child,
+  double? height,
+}) {
   final screenH = MediaQuery.of(context).size.height;
   final sheetH = height ?? screenH * 0.55;
   return showModalBottomSheet<T>(
@@ -368,8 +412,9 @@ Future<T?> showTideSheet<T>(
     builder: (ctx) {
       final keyboardInset = MediaQuery.viewInsetsOf(ctx).bottom;
       final availableHeight = screenH - keyboardInset;
-      final effectiveHeight =
-          height == null ? screenH * 0.55 : sheetH.clamp(0.0, availableHeight);
+      final effectiveHeight = height == null
+          ? screenH * 0.55
+          : sheetH.clamp(0.0, availableHeight);
       return GestureDetector(
         onTap: () => Navigator.pop(ctx),
         child: AnimatedContainer(
@@ -466,8 +511,12 @@ class ParticleOverlay extends StatefulWidget {
   final Widget child;
   final List<Offset> origins;
   final VoidCallback? onDone;
-  const ParticleOverlay(
-      {super.key, required this.child, required this.origins, this.onDone});
+  const ParticleOverlay({
+    super.key,
+    required this.child,
+    required this.origins,
+    this.onDone,
+  });
   @override
   State<ParticleOverlay> createState() => _ParticleOverlayState();
 }
@@ -482,10 +531,14 @@ class _ParticleOverlayState extends State<ParticleOverlay>
   void initState() {
     super.initState();
     _c = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 2000));
-    _c.addListener(() => setState(() {
-          for (var p in _ps) p.update();
-        }));
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    );
+    _c.addListener(
+      () => setState(() {
+        for (var p in _ps) p.update();
+      }),
+    );
     _c.addStatusListener((s) {
       if (s == AnimationStatus.completed) widget.onDone?.call();
     });
@@ -510,8 +563,16 @@ class _ParticleOverlayState extends State<ParticleOverlay>
         final sx = 1.5 + _r.nextDouble() * 5;
         final ox = (_r.nextDouble() - 0.5) * 80;
         final oy = (_r.nextDouble() - 0.5) * 50;
-        _ps.add(Particle(o.dx + ox, o.dy + oy, cos(angle) * spd,
-            sin(angle) * spd - 3, sx, colors[_r.nextInt(colors.length)]));
+        _ps.add(
+          Particle(
+            o.dx + ox,
+            o.dy + oy,
+            cos(angle) * spd,
+            sin(angle) * spd - 3,
+            sx,
+            colors[_r.nextInt(colors.length)],
+          ),
+        );
       }
     }
   }
@@ -525,12 +586,16 @@ class _ParticleOverlayState extends State<ParticleOverlay>
   @override
   Widget build(BuildContext context) {
     WidgetsBinding.instance.addPostFrameCallback((_) => _initParticles());
-    return Stack(children: [
-      widget.child,
-      Positioned.fill(
-          child:
-              IgnorePointer(child: CustomPaint(painter: ExplosionPainter(_ps))))
-    ]);
+    return Stack(
+      children: [
+        widget.child,
+        Positioned.fill(
+          child: IgnorePointer(
+            child: CustomPaint(painter: ExplosionPainter(_ps)),
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -542,32 +607,38 @@ class GlassCard extends StatelessWidget {
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final bool liquid;
-  const GlassCard(
-      {super.key,
-      required this.child,
-      this.padding = const EdgeInsets.all(16),
-      this.radius = 20,
-      this.onTap,
-      this.onLongPress,
-      this.liquid = false});
+  const GlassCard({
+    super.key,
+    required this.child,
+    this.padding = const EdgeInsets.all(16),
+    this.radius = 20,
+    this.onTap,
+    this.onLongPress,
+    this.liquid = false,
+  });
   @override
   Widget build(BuildContext context) {
+    final theme = TideTheme.of(context);
     final content = GestureDetector(
       onTap: onTap,
       onLongPress: onLongPress,
       child: Container(
         padding: padding,
         decoration: BoxDecoration(
-          color: TideTheme.of(context).glass.withValues(alpha: 0.7),
-          borderRadius: BorderRadius.circular(radius),
+          color: theme.isWechat
+              ? theme.surface
+              : theme.glass.withValues(alpha: 0.7),
+          borderRadius: BorderRadius.circular(theme.isWechat ? 5 : radius),
           border: Border.all(color: TideTheme.of(context).border, width: 0.5),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.03),
-              blurRadius: 10,
-              offset: const Offset(0, 2),
-            ),
-          ],
+          boxShadow: theme.isWechat
+              ? []
+              : [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.03),
+                    blurRadius: 10,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
         ),
         child: child,
       ),
@@ -594,17 +665,18 @@ class FrostCard extends StatelessWidget {
   final bool liquid;
   final bool transparent;
   final bool premiumGlass;
-  const FrostCard(
-      {super.key,
-      required this.child,
-      this.padding = const EdgeInsets.all(16),
-      this.margin = EdgeInsets.zero,
-      this.radius = 20,
-      this.onTap,
-      this.onLongPress,
-      this.liquid = false,
-      this.transparent = false,
-      this.premiumGlass = true});
+  const FrostCard({
+    super.key,
+    required this.child,
+    this.padding = const EdgeInsets.all(16),
+    this.margin = EdgeInsets.zero,
+    this.radius = 20,
+    this.onTap,
+    this.onLongPress,
+    this.liquid = false,
+    this.transparent = false,
+    this.premiumGlass = true,
+  });
   @override
   Widget build(BuildContext context) {
     final theme = TideTheme.of(context);
@@ -616,22 +688,24 @@ class FrostCard extends StatelessWidget {
         child: Container(
           padding: padding,
           decoration: BoxDecoration(
-            color: transparent
+            color: theme.isWechat
+                ? theme.surface
+                : transparent
                 ? Colors.transparent
                 : theme.useLiquidGlass
-                    ? theme.glass.withValues(
-                        alpha: theme.isDark ? 0.36 : 0.48,
-                      )
-                    : theme.glass.withValues(alpha: 0.7),
-            borderRadius: BorderRadius.circular(radius),
+                ? theme.glass.withValues(alpha: theme.isDark ? 0.36 : 0.48)
+                : theme.glass.withValues(alpha: 0.7),
+            borderRadius: BorderRadius.circular(theme.isWechat ? 5 : radius),
             border: Border.all(color: TideTheme.of(context).border, width: 0.5),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 12,
-                offset: const Offset(0, 3),
-              ),
-            ],
+            boxShadow: theme.isWechat
+                ? []
+                : [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 12,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
           ),
           child: child,
         ),

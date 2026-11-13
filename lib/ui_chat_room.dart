@@ -45,6 +45,7 @@ import 'message_delivery_service.dart';
 import 'app_state.dart';
 import 'ui_components.dart';
 import 'theme.dart';
+import 'wechat_theme_widgets.dart';
 import 'app_permissions.dart';
 import 'media_preprocessor.dart';
 import 'voice_call_card.dart';
@@ -293,6 +294,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   bool _showMessageTime = true;
   bool _dimParentheticalText = true;
   bool _showChatAvatar = false;
+  String? _userAvatar;
+  double _wechatComposerHeight = 76;
   bool _showSearchSources = false;
   late Map<String, dynamic> _bot;
   final Map<String, GlobalKey> _messageKeys = <String, GlobalKey>{};
@@ -551,12 +554,14 @@ class _ChatRoomPageState extends State<ChatRoomPage>
 
   void _loadChatPreferences() async {
     final db = DBManager();
+    final userAvatar = await db.getKV('user_avatar');
     final showTime = await db.getKV('show_message_time');
     final dimParentheticalText = await db.getKV('dim_parenthetical_text');
     final showAvatar = await db.getKV('show_chat_avatar');
     final showSources = await db.getKV('show_web_search_sources');
     if (mounted) {
       setState(() {
+        _userAvatar = userAvatar;
         _showMessageTime = showTime != 'false';
         _dimParentheticalText = dimParentheticalText != 'false';
         _showChatAvatar = showAvatar == 'true';
@@ -984,7 +989,265 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     unawaited(_sendSticker(sticker));
   }
 
+  final List<_EmojiAsset> _recentWechatEmoji = [];
+  String _wechatEmojiQuery = '';
+  bool _wechatEmojiSearch = false;
+
+  void _insertWechatEmoji(_EmojiAsset emoji) {
+    final text = _msgC.text;
+    final selection = _msgC.selection;
+    final start = selection.isValid ? selection.start : text.length;
+    final end = selection.isValid ? selection.end : text.length;
+    _msgC.value = TextEditingValue(
+      text: text.replaceRange(start, end, emoji.glyph),
+      selection: TextSelection.collapsed(offset: start + emoji.glyph.length),
+    );
+    setState(() {
+      _recentWechatEmoji.removeWhere((item) => item.asset == emoji.asset);
+      _recentWechatEmoji.insert(0, emoji);
+      if (_recentWechatEmoji.length > 8) _recentWechatEmoji.removeLast();
+    });
+  }
+
+  void _deleteWechatEmoji() {
+    final value = _msgC.value;
+    final start = value.selection.isValid
+        ? value.selection.start
+        : value.text.length;
+    final end = value.selection.isValid
+        ? value.selection.end
+        : value.text.length;
+    if (start == end && start == 0) return;
+    final before = value.text.substring(0, start);
+    final cut = start == end
+        ? before.characters.skipLast(1).toString().length
+        : start;
+    _msgC.value = TextEditingValue(
+      text: value.text.replaceRange(cut, end, ''),
+      selection: TextSelection.collapsed(offset: cut),
+    );
+  }
+
+  Widget _wechatEmojiPicker(TideTheme theme) {
+    final items = _emojiCatalog
+        .where(
+          (item) =>
+              _wechatEmojiQuery.isEmpty ||
+              item.name.contains(_wechatEmojiQuery) ||
+              item.glyph.contains(_wechatEmojiQuery),
+        )
+        .toList();
+    Widget grid(List<_EmojiAsset> entries) => GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 8,
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 4,
+      ),
+      itemCount: entries.length,
+      itemBuilder: (_, index) => Tooltip(
+        message: entries[index].name,
+        child: InkWell(
+          onTap: () => _insertWechatEmoji(entries[index]),
+          borderRadius: BorderRadius.circular(6),
+          child: Padding(
+            padding: const EdgeInsets.all(5),
+            child: Image.asset(
+              entries[index].asset,
+              errorBuilder: (_, error, stack) => Center(
+                child: Text(
+                  entries[index].glyph,
+                  style: const TextStyle(fontSize: 25),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    return Material(
+      color: theme.wechatBar,
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 286,
+          child: Column(
+            children: [
+              Container(
+                height: 52,
+                decoration: BoxDecoration(
+                  color: theme.surfaceVariant,
+                  border: Border(
+                    bottom: BorderSide(color: theme.border, width: .5),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    IconButton(
+                      tooltip: '搜索表情',
+                      onPressed: () => setState(() {
+                        _wechatEmojiSearch = !_wechatEmojiSearch;
+                        if (!_wechatEmojiSearch) _wechatEmojiQuery = '';
+                      }),
+                      icon: Icon(Icons.search, color: theme.textStrong),
+                    ),
+                    for (final tab in [
+                      (0, Icons.emoji_emotions_outlined, '所有表情'),
+                      (1, Icons.favorite_border, '我的表情'),
+                    ])
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 5),
+                        child: IconButton(
+                          tooltip: tab.$3,
+                          onPressed: () => setState(() => _emojiTab = tab.$1),
+                          style: IconButton.styleFrom(
+                            backgroundColor: _emojiTab == tab.$1
+                                ? theme.surface
+                                : Colors.transparent,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          icon: Icon(tab.$2, color: theme.textStrong),
+                        ),
+                      ),
+                    const Spacer(),
+                    IconButton(
+                      tooltip: '切换键盘',
+                      onPressed: () {
+                        _setEmojiPanel(false);
+                        _inputFocus.requestFocus();
+                      },
+                      icon: Icon(
+                        Icons.keyboard_outlined,
+                        color: theme.textStrong,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (_wechatEmojiSearch)
+                SizedBox(
+                  height: 40,
+                  child: TextField(
+                    onChanged: (value) =>
+                        setState(() => _wechatEmojiQuery = value.trim()),
+                    decoration: const InputDecoration(
+                      hintText: '搜索表情名称',
+                      prefixIcon: Icon(Icons.search),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12),
+                      border: InputBorder.none,
+                    ),
+                  ),
+                ),
+              Expanded(
+                child: _emojiTab == 1
+                    ? !_stickersLoaded
+                          ? Center(
+                              child: CircularProgressIndicator(
+                                color: theme.primary,
+                              ),
+                            )
+                          : _stickers.isEmpty
+                          ? const Center(child: Text('暂无我的表情'))
+                          : GridView.builder(
+                              padding: const EdgeInsets.all(12),
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: 5,
+                                    mainAxisSpacing: 10,
+                                    crossAxisSpacing: 10,
+                                  ),
+                              itemCount: _stickers.length,
+                              itemBuilder: (_, index) => InkWell(
+                                onTap: () => _selectSticker(_stickers[index]),
+                                child: _localStickerPreview(
+                                  _stickers[index]['file_path']?.toString() ??
+                                      '',
+                                  fit: BoxFit.contain,
+                                ),
+                              ),
+                            )
+                    : _emojiCatalogLoading
+                    ? Center(
+                        child: CircularProgressIndicator(color: theme.primary),
+                      )
+                    : Stack(
+                        children: [
+                          ListView(
+                            padding: const EdgeInsets.fromLTRB(12, 10, 12, 56),
+                            children: [
+                              Center(
+                                child: Container(
+                                  width: 38,
+                                  height: 4,
+                                  margin: const EdgeInsets.only(bottom: 12),
+                                  decoration: BoxDecoration(
+                                    color: theme.border,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                ),
+                              ),
+                              if (_recentWechatEmoji.isNotEmpty &&
+                                  _wechatEmojiQuery.isEmpty) ...[
+                                Text(
+                                  '最近使用',
+                                  style: TextStyle(
+                                    color: theme.textWeak,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                grid(_recentWechatEmoji),
+                                const SizedBox(height: 12),
+                              ],
+                              Text(
+                                _wechatEmojiQuery.isEmpty ? '所有表情' : '搜索结果',
+                                style: TextStyle(
+                                  color: theme.textWeak,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              if (items.isEmpty)
+                                const Padding(
+                                  padding: EdgeInsets.all(16),
+                                  child: Text('没有匹配的表情'),
+                                )
+                              else
+                                grid(items),
+                            ],
+                          ),
+                          Positioned(
+                            right: 12,
+                            bottom: 8,
+                            child: IconButton.filled(
+                              tooltip: '删除',
+                              onPressed: _deleteWechatEmoji,
+                              style: IconButton.styleFrom(
+                                backgroundColor: theme.surface,
+                                foregroundColor: theme.textWeak,
+                                minimumSize: const Size(54, 40),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              icon: const Icon(Icons.backspace_outlined),
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _emojiPicker(TideTheme theme) {
+    if (theme.isWechat) return _wechatEmojiPicker(theme);
     final items = _emojiCatalog
         .where((emoji) => emoji.category == _emojiCategory)
         .toList(growable: false);
@@ -2406,7 +2669,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       onLongPress: () => _msgLongPress(msg), // 增加长按支持
       child: Container(
         constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
+          maxWidth:
+              MediaQuery.of(context).size.width *
+              (theme.isWechat ? 0.70 : 0.75),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
@@ -3247,6 +3512,50 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     final value = knownDuration
         ? position.inMilliseconds.clamp(0, max.toInt()).toDouble()
         : 0.0;
+    final theme = TideTheme.of(context);
+    if (theme.isWechat) {
+      final foreground = isUser ? const Color(0xFF111111) : theme.textStrong;
+      return GestureDetector(
+        onTap: () => _toggleAudio(path),
+        child: WechatBubble(
+          isUser: isUser,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    active && _audioPlaying
+                        ? Icons.pause
+                        : Icons.volume_up_outlined,
+                    color: foreground,
+                    size: 25,
+                  ),
+                  const SizedBox(width: 28),
+                  Text(
+                    knownDuration ? '${duration.inSeconds}″' : '语音',
+                    style: TextStyle(color: foreground, fontSize: 16),
+                  ),
+                ],
+              ),
+              if (transcript.trim().isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  transcript.trim(),
+                  style: TextStyle(
+                    color: foreground,
+                    fontSize: 15,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
     final foreground = isUser ? Colors.white : TideTheme.of(context).textStrong;
     final muted = isUser
         ? Colors.white.withValues(alpha: 0.78)
@@ -3456,7 +3765,73 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   }
 
   // ========== 长按消息 ==========
+  Future<void> _wechatMessageMenu(Map<String, dynamic> msg) async {
+    final anchor = _messageKeys[msg['id']?.toString()]?.currentContext;
+    if (anchor == null) return;
+    final retry =
+        msg['role'] == 'user' &&
+        msg['error_log']?.toString().isNotEmpty == true;
+    final action = await showTidePopover<String>(
+      context: anchor,
+      preferAbove: true,
+      width: retry ? 240 : 164,
+      backgroundColor: const Color(0xFF4C4C4C),
+      radius: 7,
+      builder: (menuContext) => Row(
+        children: [
+          for (final item in [
+            (id: 'copy', label: '复制', icon: Icons.copy_outlined),
+            if (retry) (id: 'retry', label: '重发', icon: Icons.refresh),
+            (id: 'delete', label: '删除', icon: Icons.delete_outline),
+          ])
+            Expanded(
+              child: InkWell(
+                onTap: () => Navigator.pop(menuContext, item.id),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(item.icon, color: Colors.white, size: 23),
+                      const SizedBox(height: 7),
+                      Text(
+                        item.label,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (action == 'copy') {
+      await Clipboard.setData(
+        ClipboardData(text: msg['content']?.toString() ?? ''),
+      );
+    } else if (action == 'retry') {
+      await _retryMessage(msg);
+    } else if (action == 'delete') {
+      await DBManager().deleteMessage(msg['id'].toString());
+      if (mounted)
+        setState(
+          () => _msgs.removeWhere(
+            (m) => m['id'].toString() == msg['id'].toString(),
+          ),
+        );
+    }
+  }
+
   void _msgLongPress(Map<String, dynamic> msg) {
+    if (TideTheme.of(context).isWechat) {
+      _wechatMessageMenu(msg);
+      return;
+    }
     final text = msg['content']?.toString() ?? '';
     showTideSheet(
       context: context,
@@ -3673,6 +4048,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
 
   Widget _chatHeader() {
     final theme = TideTheme.of(context);
+    if (theme.isWechat) return _wechatHeader();
     final path = _hasBg
         ? _customBg
         : !_chatBackgroundCleared && theme.hasGlobalBackground
@@ -3778,6 +4154,112 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       ),
     );
   }
+
+  Widget _wechatHeader() {
+    final theme = TideTheme.of(context);
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle(
+        statusBarColor: theme.wechatBar,
+        statusBarIconBrightness: theme.isDark
+            ? Brightness.light
+            : Brightness.dark,
+        statusBarBrightness: theme.isDark ? Brightness.dark : Brightness.light,
+      ),
+      child: ColoredBox(
+        color: theme.wechatBar,
+        child: SafeArea(
+          bottom: false,
+          child: Container(
+            height: 56,
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: theme.divider, width: .5),
+              ),
+            ),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 56,
+                  child: IconButton(
+                    tooltip: '返回',
+                    icon: Icon(
+                      Icons.arrow_back_ios_new,
+                      size: 22,
+                      color: theme.textStrong,
+                    ),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        _bot['name']?.toString() ?? '',
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: theme.textStrong,
+                        ),
+                      ),
+                      if (_typing)
+                        Text(
+                          '正在输入中...',
+                          style: TextStyle(fontSize: 11, color: theme.textWeak),
+                        ),
+                    ],
+                  ),
+                ),
+                SizedBox(
+                  width: 56,
+                  child: IconButton(
+                    tooltip: '聊天信息',
+                    icon: Icon(
+                      Icons.more_horiz,
+                      color: theme.textStrong,
+                      size: 28,
+                    ),
+                    onPressed: () {
+                      _inputFocus.unfocus();
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => WechatChatInfoPage(
+                            actions: [
+                              (
+                                title: '语音通话',
+                                onTap: () {
+                                  _openCallPreparation();
+                                },
+                              ),
+                              (title: '聊天记录管理', onTap: _showDeleteOptions),
+                              (title: '模型设置', onTap: _showModelSettings),
+                              (title: '机器人信息', onTap: _showBotInfo),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _wechatMessageAvatar(bool isUser) => Padding(
+    padding: EdgeInsets.only(left: isUser ? 10 : 0, right: isUser ? 0 : 10),
+    child: TideBotAvatar(
+      name: isUser ? '我' : (_bot['name']?.toString() ?? 'TideBot'),
+      path: isUser ? _userAvatar : _bot['avatar']?.toString(),
+      size: 40,
+      radius: 4,
+    ),
+  );
 
   Future<void> _openCallPreparation() async {
     final botId = _bot['id']?.toString() ?? '';
@@ -3948,7 +4430,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         12,
         8,
         12,
-        _inputBarHeight + (_emojiPanelHeight * _emojiPanelCtrl.value) + 8,
+        TideTheme.of(context).isWechat
+            ? _wechatComposerHeight + 8
+            : _inputBarHeight + (_emojiPanelHeight * _emojiPanelCtrl.value) + 8,
       ),
       itemCount: _msgs.length,
       itemBuilder: (ctx, i) {
@@ -4052,6 +4536,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
             replyId?.isNotEmpty == true ||
             sharedPost != null;
         final showTimeHere =
+            !theme.isWechat &&
             _showMessageTime &&
             !isStreamingPlaceholder &&
             !isEmoji &&
@@ -4095,10 +4580,53 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                           ? CrossAxisAlignment.end
                           : CrossAxisAlignment.start,
                       children: [
+                        if (theme.isWechat &&
+                            _showMessageTime &&
+                            !isStreamingPlaceholder &&
+                            hasVisibleContent &&
+                            (i == _msgs.length - 1 ||
+                                ts -
+                                        ((_msgs[_msgs.length -
+                                                        2 -
+                                                        i]['timestamp']
+                                                    as num?)
+                                                ?.toInt() ??
+                                            0) >=
+                                    300000))
+                          SizedBox(
+                            width: MediaQuery.sizeOf(context).width - 24,
+                            child: Padding(
+                              padding: const EdgeInsets.only(
+                                top: 8,
+                                bottom: 16,
+                              ),
+                              child: Center(
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: theme.surface.withValues(alpha: .88),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    fmtTime(ts),
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: theme.textWeak,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            if (theme.isWechat && !isUser)
+                              _wechatMessageAvatar(false),
                             if (isUser && hasRetryFailure)
                               GestureDetector(
                                 onTap: () => _showErrorDetails(m),
@@ -4112,17 +4640,31 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                                 ),
                               ),
                             Container(
-                              margin: const EdgeInsets.only(bottom: 8),
+                              margin: EdgeInsets.only(
+                                bottom: theme.isWechat ? 14 : 8,
+                              ),
                               constraints: BoxConstraints(
-                                maxWidth:
-                                    MediaQuery.of(context).size.width * 0.75,
+                                maxWidth: theme.isWechat
+                                    ? (MediaQuery.sizeOf(context).width -
+                                              24 -
+                                              50 -
+                                              (isUser && hasRetryFailure
+                                                  ? 28
+                                                  : 0))
+                                          .clamp(
+                                            0.0,
+                                            MediaQuery.sizeOf(context).width *
+                                                .70,
+                                          )
+                                          .toDouble()
+                                    : MediaQuery.sizeOf(context).width * .75,
                               ),
                               child: Column(
                                 crossAxisAlignment: isUser
                                     ? CrossAxisAlignment.end
                                     : CrossAxisAlignment.start,
                                 children: [
-                                  if (_showChatAvatar)
+                                  if (_showChatAvatar && !theme.isWechat)
                                     Padding(
                                       padding: const EdgeInsets.only(bottom: 4),
                                       child: isUser
@@ -4434,6 +4976,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                                 ],
                               ),
                             ),
+                            if (theme.isWechat && isUser)
+                              _wechatMessageAvatar(true),
                           ],
                         ),
                         if (_showSearchSources &&
@@ -4568,9 +5112,14 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   }
 
   Widget _renderPlainText(String text, bool isUser) {
+    final theme = TideTheme.of(context);
     final baseStyle = TextStyle(
-      color: isUser ? Colors.white : TideTheme.of(context).textStrong,
-      fontSize: 14,
+      color: theme.isWechat
+          ? (theme.isDark && !isUser
+                ? theme.textStrong
+                : const Color(0xFF111111))
+          : (isUser ? Colors.white : theme.textStrong),
+      fontSize: theme.isWechat ? 17 : 14,
       fontFamily: 'TideFont',
       height: 1.5,
     );
@@ -4590,9 +5139,11 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         TextSpan(
           text: text.substring(m.start, m.end),
           style: baseStyle.copyWith(
-            color: isUser
-                ? Colors.white.withValues(alpha: 0.6)
-                : TideTheme.of(context).textWeak,
+            color: theme.isWechat
+                ? baseStyle.color?.withValues(alpha: .65)
+                : (isUser
+                      ? Colors.white.withValues(alpha: 0.6)
+                      : theme.textWeak),
             fontSize: 12,
             fontStyle: FontStyle.italic,
           ),
@@ -4602,6 +5153,14 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     }
     if (last < text.length) {
       spans.add(TextSpan(text: text.substring(last), style: baseStyle));
+    }
+    if (theme.isWechat) {
+      return WechatBubble(
+        isUser: isUser,
+        child: RichText(
+          text: TextSpan(style: baseStyle, children: spans),
+        ),
+      );
     }
     return Container(
       padding: const EdgeInsets.all(12),
@@ -4821,7 +5380,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   // its reserved message space once it has fully left the screen.
 
   Widget _composer() {
-    return Column(
+    final wechat = TideTheme.of(context).isWechat;
+    final composer = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         _inputBar(),
@@ -4853,10 +5413,21 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         ),
       ],
     );
+    return wechat
+        ? ThemeMeasuredSize(
+            onChange: (size) {
+              if (mounted && (size.height - _wechatComposerHeight).abs() > .5) {
+                setState(() => _wechatComposerHeight = size.height);
+              }
+            },
+            child: composer,
+          )
+        : composer;
   }
 
   Widget _inputBar() {
     final theme = TideTheme.of(context);
+    if (theme.isWechat) return _wechatInputBar();
     final hasSendContent =
         _hasText ||
         _pendingImages.isNotEmpty ||
@@ -4991,6 +5562,132 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                             ),
                     ),
                   ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _wechatInputBar() {
+    final theme = TideTheme.of(context);
+    final canSend =
+        _hasText ||
+        _pendingImages.isNotEmpty ||
+        _pendingDocuments.isNotEmpty ||
+        _pendingExpression != null;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.surfaceVariant,
+        border: Border(top: BorderSide(color: theme.divider, width: .5)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_pendingImages.isNotEmpty || _pendingDocuments.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: _attachmentPreview(theme),
+                ),
+              if (_pendingExpression != null)
+                Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: _pendingExpressionPreview(theme),
+                ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  IconButton(
+                    tooltip: _isRecording ? '结束录音' : '录音',
+                    onPressed: !_isRecording && _sendVoiceCooldown.isBlocked
+                        ? null
+                        : _toggleRec,
+                    icon: WechatIcon(
+                      kind: 'voice',
+                      size: 29,
+                      color: _isRecording ? Colors.red : theme.textStrong,
+                    ),
+                  ),
+                  Expanded(
+                    child: Container(
+                      constraints: const BoxConstraints(minHeight: 40),
+                      decoration: BoxDecoration(
+                        color: theme.surface,
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: TextField(
+                        contextMenuBuilder: androidTextContextMenu,
+                        focusNode: _inputFocus,
+                        controller: _msgC,
+                        minLines: 1,
+                        maxLines: 4,
+                        textInputAction: TextInputAction.newline,
+                        style: TextStyle(fontSize: 17, color: theme.textStrong),
+                        decoration: InputDecoration(
+                          filled: false,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          hintText: _isRecording
+                              ? '正在录音 $_recSecs 秒，点击左侧结束'
+                              : '',
+                          hintStyle: TextStyle(
+                            fontSize: 12,
+                            color: theme.textWeak,
+                          ),
+                          border: InputBorder.none,
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 10,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: _showEmojiPanel ? '收起表情' : '表情',
+                    onPressed: _toggleEmojiPanel,
+                    icon: WechatIcon(
+                      kind: 'smile',
+                      size: 29,
+                      color: theme.textStrong,
+                    ),
+                  ),
+                  if (canSend)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 3, right: 4),
+                      child: TextButton(
+                        onPressed: _sendFromComposer,
+                        style: TextButton.styleFrom(
+                          backgroundColor: theme.primary,
+                          foregroundColor: Colors.white,
+                          minimumSize: const Size(52, 36),
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                        ),
+                        child: const Text('发送'),
+                      ),
+                    )
+                  else
+                    Builder(
+                      builder: (triggerContext) => IconButton(
+                        tooltip: '图片和文件',
+                        onPressed: () => _pickMedia(triggerContext),
+                        icon: WechatIcon(
+                          kind: 'add',
+                          size: 29,
+                          color: theme.textStrong,
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ],
@@ -5165,20 +5862,24 @@ class _SharedPostCardState extends State<_SharedPostCard> {
         (_feed?['image'] ?? payload['image_path'])?.toString() ?? '';
     final timestamp = (payload['timestamp'] as num?)?.toInt();
     final imageExists = imagePath.isNotEmpty && File(imagePath).existsSync();
-    final foreground = isUser ? Colors.white : theme.textStrong;
-    final muted = isUser
-        ? Colors.white.withValues(alpha: 0.76)
-        : theme.textWeak;
+    final foreground = theme.isWechat
+        ? (isUser ? const Color(0xFF111111) : theme.textStrong)
+        : (isUser ? Colors.white : theme.textStrong);
+    final muted = theme.isWechat
+        ? foreground.withValues(alpha: .65)
+        : (isUser ? Colors.white.withValues(alpha: 0.76) : theme.textWeak);
     return GestureDetector(
       onTap: _deleted ? null : _open,
       child: Container(
         width: 245,
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: isUser
-              ? theme.primary.withValues(alpha: 0.92)
-              : theme.buttonSecondary,
-          borderRadius: BorderRadius.circular(16),
+          color: theme.isWechat
+              ? (isUser ? theme.wechatOutgoing : theme.surface)
+              : (isUser
+                    ? theme.primary.withValues(alpha: 0.92)
+                    : theme.buttonSecondary),
+          borderRadius: BorderRadius.circular(theme.isWechat ? 5 : 16),
         ),
         child: _deleted
             ? Text(
