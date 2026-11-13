@@ -6,6 +6,8 @@ import 'package:path/path.dart' as p;
 
 import 'plugin_config_dialog.dart';
 import 'plugin_service.dart';
+import 'plugin_operation.dart';
+import 'transfer_progress.dart';
 import 'plugin_system.dart';
 import 'plugin_ui_page.dart';
 import 'theme.dart';
@@ -21,9 +23,11 @@ class _PluginManagerPageState extends State<PluginManagerPage> {
   var _tab = 0;
   var _loading = true;
   var _busy = false;
+  PluginOperation? _operation;
 
   @override
   void dispose() {
+    _operation?.cancel();
     _cleanTemp();
     super.dispose();
   }
@@ -74,14 +78,36 @@ class _PluginManagerPageState extends State<PluginManagerPage> {
     context,
   ).showSnackBar(SnackBar(content: Text(message)));
 
-  Future<void> _operate(Future<void> Function() action) async {
+  Future<void> _operate(
+    Future<void> Function() action, {
+    bool cancellable = false,
+    String label = '正在处理插件…',
+  }) async {
     if (_busy || !mounted) return;
     setState(() => _busy = true);
+    final operation = cancellable ? PluginOperation() : null;
+    _operation = operation;
+    operation?.startDeadline();
     try {
-      await action();
+      await TransferProgress.run(context, label, () async {
+        operation?.check();
+        await action();
+      }, operation: operation);
     } catch (error) {
-      if (mounted) _notice('操作失败：$error');
+      if (mounted) {
+        if (operation?.cancelled == true) {
+          try {
+            operation?.check();
+          } catch (reason) {
+            _notice('$reason');
+          }
+        } else {
+          _notice('操作失败：$error');
+        }
+      }
     } finally {
+      operation?.dispose();
+      _operation = null;
       await _reload();
       if (mounted) setState(() => _busy = false);
     }
@@ -121,7 +147,8 @@ class _PluginManagerPageState extends State<PluginManagerPage> {
     final path = await _pickZip();
     if (path == null) return;
     try {
-      await PluginSystem.instance.installZip(path);
+      _operation?.check();
+      await PluginSystem.instance.installZip(path, operation: _operation);
       if (mounted) _notice('插件已安装，默认关闭；配置完成后可启用');
     } finally {
       await _cleanTemp();
@@ -132,7 +159,12 @@ class _PluginManagerPageState extends State<PluginManagerPage> {
     final path = await _pickZip();
     if (path == null) return;
     try {
-      await PluginService.instance.updateZip(row['id'] as String, path);
+      _operation?.check();
+      await PluginService.instance.updateZip(
+        row['id'] as String,
+        path,
+        operation: _operation,
+      );
       if (mounted) _notice('插件已更新');
     } finally {
       await _cleanTemp();
@@ -263,11 +295,7 @@ class _PluginManagerPageState extends State<PluginManagerPage> {
           end: Alignment.bottomRight,
         ),
       ),
-      child: Icon(
-        Icons.power_rounded,
-        size: size * .5,
-        color: theme.primary,
-      ),
+      child: Icon(Icons.power_rounded, size: size * .5, color: theme.primary),
     );
     return ClipRRect(
       borderRadius: BorderRadius.circular(size * .28),
@@ -521,7 +549,10 @@ class _PluginManagerPageState extends State<PluginManagerPage> {
                                     () => PluginService.instance.setEnabled(
                                       id,
                                       !enabled,
+                                      operation: _operation,
                                     ),
+                                    cancellable: !enabled,
+                                    label: enabled ? '正在关闭插件…' : '正在启用插件…',
                                   ),
                             child: SizedBox(
                               width: 48,
@@ -620,7 +651,13 @@ class _PluginManagerPageState extends State<PluginManagerPage> {
                     _action(
                       Icons.upgrade_rounded,
                       '更新插件',
-                      _busy ? null : () => _operate(() => _update(row)),
+                      _busy
+                          ? null
+                          : () => _operate(
+                              () => _update(row),
+                              cancellable: true,
+                              label: '正在更新插件…',
+                            ),
                     ),
                     _action(
                       Icons.delete_outline_rounded,
@@ -754,7 +791,6 @@ class _PluginManagerPageState extends State<PluginManagerPage> {
             )
           : Column(
               children: [
-                if (_busy) const LinearProgressIndicator(),
                 Expanded(
                   child: _plugins.isEmpty
                       ? const Center(child: Text('暂无已安装插件'))
@@ -774,7 +810,10 @@ class _PluginManagerPageState extends State<PluginManagerPage> {
             ),
       floatingActionButton: _tab == 0
           ? FloatingActionButton(
-              onPressed: _busy ? null : () => _operate(_install),
+              onPressed: _busy
+                  ? null
+                  : () =>
+                        _operate(_install, cancellable: true, label: '正在安装插件…'),
               tooltip: '导入插件 ZIP',
               child: const Icon(Icons.add_rounded),
             )

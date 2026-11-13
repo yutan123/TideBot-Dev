@@ -1,3 +1,4 @@
+import 'plugin_operation.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -99,7 +100,8 @@ class PluginWebServer {
     await server?.close(force: true);
   }
 
-  static const bridge = r'''
+  static final bridge =
+      r'''
 (()=>{
  const pending=new Map();let seq=0;
  Object.defineProperty(window,'tideUI',{value:Object.freeze({
@@ -107,7 +109,7 @@ class PluginWebServer {
    if(pending.size>=8)return Promise.reject(Error('Too many UI requests'));
    const id=++seq;
    return new Promise((resolve,reject)=>{
-    const timer=setTimeout(()=>{pending.delete(id);reject(Error('UI action timed out'));},16000);
+    const timer=setTimeout(()=>{pending.delete(id);reject(Error('UI action timed out'));},__TIDE_UI_TIMEOUT__);
     pending.set(id,{resolve,reject,timer});
     try{TidePluginUI.postMessage(JSON.stringify({id,action,values}));}
     catch(e){clearTimeout(timer);pending.delete(id);reject(e);}
@@ -116,5 +118,9 @@ class PluginWebServer {
  }),writable:false});
  window.__tideUIResolve=(id,value,error)=>{const p=pending.get(id);if(!p)return;pending.delete(id);clearTimeout(p.timer);error?p.reject(Error(error)):p.resolve(value);};
 })();
-''';
+'''
+          .replaceAll(
+            '__TIDE_UI_TIMEOUT__',
+            '${PluginTimeouts.host.inMilliseconds}',
+          );
 }

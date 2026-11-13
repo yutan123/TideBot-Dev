@@ -1,3 +1,5 @@
+import 'plugin_operation.dart';
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
@@ -64,13 +66,16 @@ class PluginSystem {
     String zipPath, {
     bool update = false,
     String? expectedId,
+    PluginOperation? operation,
   }) => _transaction((root) async {
+    operation?.check();
     final file = File(zipPath);
     if (await file.length() > PluginArchive.maxCompressed) {
       throw const FormatException('插件包超过 256 MiB 限制');
     }
     final bytes = await file.readAsBytes();
-    final archive = await Isolate.run(() => PluginArchive.decode(bytes));
+    final archive = await _decodeArchive(bytes, operation);
+    operation?.check();
     final manifest = archive.manifest;
     final id = manifest['id'] as String;
     _checkId(id);
@@ -94,10 +99,12 @@ class PluginSystem {
     var committed = false;
     try {
       for (final entry in archive.files.entries) {
+        operation?.check();
         final out = File(p.join(staging.path, entry.key));
         await out.parent.create(recursive: true);
         await out.writeAsBytes(entry.value, flush: true);
       }
+      operation?.beginCommit();
       final marker = DateTime.now().microsecondsSinceEpoch;
       final encodedManifest = jsonEncode(manifest);
       await _journal(root, {
@@ -134,6 +141,8 @@ class PluginSystem {
         await staging.delete(recursive: true);
       }
       rethrow;
+    } finally {
+      operation?.endCommit();
     }
   });
 
@@ -172,5 +181,66 @@ class PluginSystem {
       jsonDecode(row['manifest_json'] as String) as Map<String, dynamic>,
       Directory(p.join((await _root).path, id)),
     );
+  }
+}
+
+void _decodeArchiveWorker(List<dynamic> args) {
+  final port = args[0] as SendPort;
+  try {
+    port.send(PluginArchive.decode(args[1] as List<int>));
+  } catch (error, stack) {
+    port.send([error.toString(), stack.toString()]);
+  }
+}
+
+Future<PluginArchive> _decodeArchive(
+  List<int> bytes,
+  PluginOperation? operation,
+) async {
+  if (operation == null) return Isolate.run(() => PluginArchive.decode(bytes));
+  operation.check();
+  final port = ReceivePort();
+  final result = Completer<PluginArchive>();
+  Isolate? worker;
+  final subscription = port.listen((message) {
+    if (result.isCompleted) return;
+    if (message is PluginArchive) {
+      result.complete(message);
+    } else {
+      result.completeError(
+        FormatException(
+          message is List ? message.first.toString() : '插件解压进程提前结束',
+        ),
+      );
+    }
+  });
+  final detach = operation.listen(() {
+    worker?.kill(priority: Isolate.immediate);
+    // The result listener is attached below before any cancellation can fire.
+    if (!result.isCompleted)
+      result.completeError(const PluginOperationCancelled());
+  });
+  try {
+    final spawning =
+        Isolate.spawn<List<dynamic>>(
+          _decodeArchiveWorker,
+          [port.sendPort, bytes],
+          onError: port.sendPort,
+          onExit: port.sendPort,
+        ).then((isolate) {
+          worker = isolate;
+          if (operation.cancelled) isolate.kill(priority: Isolate.immediate);
+        });
+    final values = await Future.wait<dynamic>([
+      spawning,
+      result.future,
+    ], eagerError: true);
+    operation.check();
+    return values[1] as PluginArchive;
+  } finally {
+    detach();
+    worker?.kill(priority: Isolate.immediate);
+    await subscription.cancel();
+    port.close();
   }
 }

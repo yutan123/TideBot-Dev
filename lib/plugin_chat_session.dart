@@ -1,3 +1,4 @@
+import 'plugin_operation.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -24,7 +25,7 @@ class PluginChatSession {
     required this.botId,
     required this.assertCurrent,
     required this.host,
-    this.downloadTimeout = const Duration(seconds: 10),
+    this.downloadTimeout = PluginTimeouts.media,
   });
   final PluginChatHost host;
   final Duration downloadTimeout;

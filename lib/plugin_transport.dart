@@ -1,3 +1,4 @@
+import 'plugin_operation.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
@@ -10,7 +11,13 @@ class PluginTransport {
   final PluginHostCall host;
   final void Function()? onClosed;
   final void Function(List<dynamic>) workerEntry;
-  PluginTransport(this.host, {required this.workerEntry, this.onClosed});
+  final Duration callTimeout;
+  PluginTransport(
+    this.host, {
+    required this.workerEntry,
+    this.onClosed,
+    this.callTimeout = PluginTimeouts.call,
+  });
   final _pending = <int, Completer<dynamic>>{};
   final _port = ReceivePort();
   final _ready = Completer<void>();
@@ -70,7 +77,7 @@ class PluginTransport {
           if (_closed) isolate.kill(priority: Isolate.immediate);
         }),
         _ready.future,
-      ], eagerError: true).timeout(const Duration(seconds: 8));
+      ], eagerError: true).timeout(PluginTimeouts.startup);
     } catch (_) {
       close();
       rethrow;
@@ -116,12 +123,12 @@ class PluginTransport {
       _worker!.send({'id': id, 'kind': kind, 'name': name, 'payload': payload});
     } catch (e) {
       // SendPort.send throws synchronously for unsendable types. Remove the
-      // pending entry immediately so the slot is not held until a 15s timeout.
+      // pending entry immediately so the slot is not held until the call deadline.
       _pending.remove(id);
       rethrow;
     }
     try {
-      return await completer.future.timeout(const Duration(seconds: 15));
+      return await completer.future.timeout(callTimeout);
     } on TimeoutException {
       close();
       rethrow;

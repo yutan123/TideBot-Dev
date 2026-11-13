@@ -1,3 +1,4 @@
+import 'plugin_operation.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -97,7 +98,12 @@ class PluginService {
     }
   });
 
-  Future<void> setEnabled(String id, bool enabled) => _exclusive(() async {
+  Future<void> setEnabled(
+    String id,
+    bool enabled, {
+    PluginOperation? operation,
+  }) => _exclusive(() async {
+    operation?.check();
     errors.remove(id);
     if (!enabled) {
       await PluginSystem.instance.setEnabled(id, false);
@@ -108,17 +114,31 @@ class PluginService {
       (row) => row['id'] == id,
     );
     try {
-      await _start(await PluginSystem.instance.packageFor(row));
+      await _start(
+        await PluginSystem.instance.packageFor(row),
+        operation: operation,
+      );
+      operation?.beginCommit();
       await PluginSystem.instance.setEnabled(id, true);
     } catch (error) {
       await _stop(id);
       await PluginSystem.instance.setEnabled(id, false);
-      errors[id] = error.toString();
+      if (operation?.cancelled == true) {
+        errors.remove(id);
+      } else {
+        errors[id] = error.toString();
+      }
       rethrow;
+    } finally {
+      operation?.endCommit();
     }
   });
 
-  Future<void> _start(TidePluginPackage pack) async {
+  Future<void> _start(
+    TidePluginPackage pack, {
+    PluginOperation? operation,
+  }) async {
+    operation?.check();
     if (_running.containsKey(pack.id)) return;
     await _storageQueues.remove(pack.id);
     _stopping.remove(pack.id);
@@ -146,14 +166,24 @@ class PluginService {
         _log(pack.id, errors[pack.id]!);
       },
     );
+    final detachCancellation = operation?.listen(() {
+      _stopping.add(pack.id);
+      runtime.close();
+      _cancelChats(pack.id);
+      for (final client in _clients.remove(pack.id) ?? <http.Client>{}) {
+        client.close();
+      }
+    });
     _packages[pack.id] = pack;
     try {
+      operation?.check();
       final sdk = await rootBundle.loadString('assets/plugin_sdk.js');
       final source = await PluginPackageFiles(pack.directory).program(
         pack.entry,
         format: pack.manifest['entryFormat'] as String? ?? 'script',
         modules: pack.manifest['modules'] as List? ?? [],
       );
+      operation?.check();
       await runtime.start(sdk, source, values);
       await runtime.call(
         'validate',
@@ -163,6 +193,7 @@ class PluginService {
             .toList(),
       );
       await runtime.call('event', 'activate', {});
+      operation?.check();
       _running[pack.id] = runtime;
       _configSnapshots[pack.id] = jsonEncode(config);
       if ((pack.manifest['hooks'] as List? ?? []).contains('app.ready')) {
@@ -183,6 +214,8 @@ class PluginService {
       await _storageQueues.remove(pack.id);
       _stopping.remove(pack.id);
       rethrow;
+    } finally {
+      detachCancellation?.call();
     }
   }
 
@@ -220,7 +253,12 @@ class PluginService {
   /// Replaces the installed package files with a new ZIP while preserving
   /// private storage.  Stops the plugin first so the files are not in use,
   /// then re-enables it only if its persisted state was enabled.
-  Future<void> updateZip(String id, String zipPath) => _exclusive(() async {
+  Future<void> updateZip(
+    String id,
+    String zipPath, {
+    PluginOperation? operation,
+  }) => _exclusive(() async {
+    operation?.check();
     final previous = (await PluginSystem.instance.list()).firstWhere(
       (row) => row['id'] == id,
     );
@@ -233,9 +271,10 @@ class PluginService {
         zipPath,
         update: true,
         expectedId: id,
+        operation: operation,
       );
     } catch (error) {
-      if (wasEnabled) {
+      if (wasEnabled && operation?.cancelled != true) {
         try {
           final recovered = (await PluginSystem.instance.list()).firstWhere(
             (row) => row['id'] == id,
@@ -246,18 +285,33 @@ class PluginService {
           errors[id] = '更新失败，旧版恢复失败：$restartError';
         }
       }
+      if (operation?.cancelled == true) {
+        await PluginSystem.instance.setEnabled(id, false);
+      }
       rethrow;
     }
+    operation?.check();
     if (wasEnabled) {
       final rows = await PluginSystem.instance.list();
       final row = rows.firstWhere((r) => r['id'] == id);
       try {
-        await _start(await PluginSystem.instance.packageFor(row));
+        await _start(
+          await PluginSystem.instance.packageFor(row),
+          operation: operation,
+        );
+        operation?.beginCommit();
         await PluginSystem.instance.setEnabled(id, true);
       } catch (error) {
-        errors[id] = error.toString();
+        await _stop(id);
+        if (operation?.cancelled == true) {
+          errors.remove(id);
+        } else {
+          errors[id] = error.toString();
+        }
         await PluginSystem.instance.setEnabled(id, false);
         rethrow;
+      } finally {
+        operation?.endCommit();
       }
     }
   });
@@ -532,7 +586,7 @@ class PluginService {
             'headers': response.headers,
             'body': utf8.decode(bytes, allowMalformed: true),
           };
-        })().timeout(const Duration(seconds: 10));
+        })().timeout(PluginTimeouts.network);
       } finally {
         client.close();
         _clients[pack.id]?.remove(client);

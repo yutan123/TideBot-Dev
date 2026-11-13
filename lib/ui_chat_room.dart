@@ -1,3 +1,4 @@
+import 'chat_header_color.dart';
 import 'bot_avatar_crop_page.dart';
 import 'image_detail_page.dart';
 import 'proactive_request_gate.dart';
@@ -21,7 +22,6 @@ import 'dart:io';
 import 'dart:convert';
 import 'code_card.dart';
 import 'dart:async';
-import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'log_text.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -3653,103 +3653,125 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     ),
   ];
 
+  String? _headerColorPath;
+  Color? _headerSample;
+  int _headerColorRevision = 0;
+
+  void _syncHeaderColor(String? path) {
+    if (_headerColorPath == path) return;
+    _headerColorPath = path;
+    _headerSample = null;
+    final revision = ++_headerColorRevision;
+    if (path == null) return;
+    unawaited(
+      sampleChatHeaderColor(path).then((color) {
+        if (!mounted || revision != _headerColorRevision) return;
+        setState(() => _headerSample = color);
+      }),
+    );
+  }
+
   Widget _chatHeader() {
     final theme = TideTheme.of(context);
-    final hasImmersiveBackground = _hasBg || theme.hasGlobalBackground;
-    final shouldBlur = theme.useLiquidGlass && hasImmersiveBackground;
-    return ClipRRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(
-          sigmaX: shouldBlur ? 20 : 0,
-          sigmaY: shouldBlur ? 20 : 0,
-        ),
-        child: Container(
-          // The chat background is already rendered behind the header. Keep
-          // this layer transparent so the status bar and toolbar feel like one
-          // continuous image instead of a separate card.
-          color: hasImmersiveBackground
-              ? (shouldBlur
-                    ? theme.glass.withValues(alpha: .10)
-                    : Colors.transparent)
-              : theme.pageBackground,
-
-          child: SafeArea(
-            bottom: false,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              child: Row(
-                children: [
-                  GestureDetector(
-                    onTap: () => Navigator.pop(context),
-                    child: Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Icon(
-                        Icons.arrow_back_ios_rounded,
-                        size: 20,
-                        color: theme.textStrong,
-                      ),
+    final path = _hasBg
+        ? _customBg
+        : !_chatBackgroundCleared && theme.hasGlobalBackground
+        ? theme.globalBackground
+        : null;
+    _syncHeaderColor(path);
+    final background = _headerSample == null
+        ? theme.pageBackground
+        : chatHeaderSurface(_headerSample!, dark: theme.isDark);
+    final lightSurface = background.computeLuminance() > .45;
+    final foreground = lightSurface
+        ? const Color(0xFF24212A)
+        : const Color(0xFFF5F2F7);
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle(
+        statusBarColor: background,
+        statusBarIconBrightness: lightSurface
+            ? Brightness.dark
+            : Brightness.light,
+        statusBarBrightness: lightSurface ? Brightness.light : Brightness.dark,
+      ),
+      child: ColoredBox(
+        color: background,
+        child: SafeArea(
+          bottom: false,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            child: Row(
+              children: [
+                GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(
+                      Icons.arrow_back_ios_rounded,
+                      size: 20,
+                      color: foreground,
                     ),
                   ),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _bot['name'] as String? ?? '',
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                          fontFamily: 'TideFont',
+                          color: foreground,
+                        ),
+                      ),
+                      if (_typing)
                         Text(
-                          _bot['name'] as String? ?? '',
-                          overflow: TextOverflow.ellipsis,
+                          '正在输入中...',
                           style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
+                            fontSize: 11,
+                            color: theme.primary,
                             fontFamily: 'TideFont',
-                            color: theme.textStrong,
                           ),
                         ),
-                        if (_typing)
-                          Text(
-                            '正在输入中...',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: theme.primary,
-                              fontFamily: 'TideFont',
-                            ),
-                          ),
-                      ],
-                    ),
+                    ],
                   ),
-                  IconButton(
-                    icon: Icon(
-                      Icons.call_rounded,
-                      size: 20,
-                      color: theme.primary,
-                    ),
-                    onPressed: _openCallPreparation,
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.call_rounded,
+                    size: 20,
+                    color: theme.primary,
                   ),
-                  IconButton(
-                    icon: Icon(
-                      Icons.delete_outline_rounded,
-                      size: 20,
-                      color: theme.iconMuted,
-                    ),
-                    onPressed: _showDeleteOptions,
+                  onPressed: _openCallPreparation,
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.delete_outline_rounded,
+                    size: 20,
+                    color: foreground.withValues(alpha: .72),
                   ),
-                  IconButton(
-                    icon: Icon(
-                      Icons.settings_rounded,
-                      size: 20,
-                      color: theme.iconMuted,
-                    ),
-                    onPressed: _showModelSettings,
+                  onPressed: _showDeleteOptions,
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.settings_rounded,
+                    size: 20,
+                    color: foreground.withValues(alpha: .72),
                   ),
-                  IconButton(
-                    icon: Icon(
-                      Icons.menu_rounded,
-                      size: 20,
-                      color: theme.iconMuted,
-                    ),
-                    onPressed: _showBotInfo,
+                  onPressed: _showModelSettings,
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.menu_rounded,
+                    size: 20,
+                    color: foreground.withValues(alpha: .72),
                   ),
-                ],
-              ),
+                  onPressed: _showBotInfo,
+                ),
+              ],
             ),
           ),
         ),

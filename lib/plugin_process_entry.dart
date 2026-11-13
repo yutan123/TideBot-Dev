@@ -1,3 +1,4 @@
+import 'plugin_operation.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/services.dart';
@@ -20,7 +21,7 @@ Future<void> pluginProcessMain() async {
       final id = ++sequence;
       final pending = Completer<dynamic>();
       hosts[id] = pending;
-      final response = pending.future.timeout(const Duration(seconds: 12));
+      final response = pending.future.timeout(PluginTimeouts.host);
       try {
         final values = await Future.wait<dynamic>([
           emit({'type': 'host', 'id': id, 'method': method, 'args': args}),

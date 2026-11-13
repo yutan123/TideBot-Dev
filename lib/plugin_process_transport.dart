@@ -1,3 +1,4 @@
+import 'plugin_operation.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
@@ -50,7 +51,7 @@ class PluginProcessTransport {
     }
     _sessions[_token] = this;
     // Listen before the platform can report a startup failure.
-    final ready = _ready.future.timeout(const Duration(seconds: 15));
+    final ready = _ready.future.timeout(PluginTimeouts.startup);
     try {
       await Future.wait<void>([
         _invoke('open', {
@@ -136,7 +137,7 @@ class PluginProcessTransport {
     final completer = Completer<dynamic>();
     _pending[id] = completer;
     // Attach before send: disconnect may reject pending while send is in flight.
-    final response = completer.future.timeout(const Duration(seconds: 15));
+    final response = completer.future.timeout(PluginTimeouts.call);
     try {
       final values = await Future.wait<dynamic>([
         _invoke('send', {

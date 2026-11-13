@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'data_transfer.dart';
+import 'plugin_operation.dart';
 import 'theme.dart';
 import 'ui_components.dart';
 
@@ -22,8 +23,9 @@ class TransferProgress {
   static Future<T> run<T>(
     BuildContext context,
     String label,
-    Future<T> Function() action,
-  ) async {
+    Future<T> Function() action, {
+    PluginOperation? operation,
+  }) async {
     final navigator = Navigator.of(context, rootNavigator: true);
     Route<dynamic>? route;
     final shown = TideDialogs.show<void>(
@@ -32,33 +34,54 @@ class TransferProgress {
       builder: (dialogContext) {
         route = ModalRoute.of(dialogContext);
         final theme = TideTheme.of(dialogContext);
-        return PopScope(
-          canPop: false,
-          child: TideDialogSurface(
-            alignment: Alignment.bottomCenter,
-            content: Row(
-              children: [
-                SizedBox(
-                  width: 26,
-                  height: 26,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.5,
-                    color: theme.primary,
-                  ),
-                ),
-                const SizedBox(width: 18),
-                Expanded(
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      color: theme.textStrong,
-                      fontFamily: 'TideFont',
+        return StatefulBuilder(
+          builder: (context, refresh) {
+            operation?.onChanged = () {
+              if (dialogContext.mounted) refresh(() {});
+            };
+            return PopScope(
+              canPop: false,
+              child: TideDialogSurface(
+                alignment: Alignment.bottomCenter,
+                content: Row(
+                  children: [
+                    SizedBox(
+                      width: 26,
+                      height: 26,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: theme.primary,
+                      ),
                     ),
-                  ),
+                    const SizedBox(width: 18),
+                    Expanded(
+                      child: Text(
+                        operation?.cancelled == true ? '正在取消…' : label,
+                        style: TextStyle(
+                          color: theme.textStrong,
+                          fontFamily: 'TideFont',
+                        ),
+                      ),
+                    ),
+                    if (operation != null) ...[
+                      const SizedBox(width: 12),
+                      TextButton(
+                        onPressed: operation.canCancel
+                            ? () {
+                                operation.cancel();
+                              }
+                            : null,
+                        style: TextButton.styleFrom(
+                          foregroundColor: theme.primary,
+                        ),
+                        child: const Text('取消'),
+                      ),
+                    ],
+                  ],
                 ),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         );
       },
     );
@@ -67,6 +90,7 @@ class TransferProgress {
       await WidgetsBinding.instance.endOfFrame;
       return await action();
     } finally {
+      operation?.onChanged = null;
       final current = route;
       if (navigator.mounted && current != null && current.isActive) {
         navigator.removeRoute(current);

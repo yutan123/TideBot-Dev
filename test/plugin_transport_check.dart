@@ -140,8 +140,12 @@ Future<void> main() async {
   await rejected(exiting.call('tool', 'exit', null), '意外退出');
   expect(exiting.closed);
 
-  // Exercise the production 15-second timeout with a real unresponsive isolate.
-  final timeout = PluginTransport((_, args) async => args, workerEntry: worker);
+  // Exercise timeout cleanup with a real unresponsive isolate and a short test budget.
+  final timeout = PluginTransport(
+    (_, args) async => args,
+    workerEntry: worker,
+    callTimeout: const Duration(milliseconds: 100),
+  );
   await timeout.start('', '', {});
   try {
     await timeout.call('tool', 'wait', null);
